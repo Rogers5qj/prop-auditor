@@ -284,9 +284,9 @@ with st.expander("📘 Read the Column: How This System Works"):
     * **The Reality Check:** We weigh recent hot streaks against sustainable averages.
     """)
 
-    with st.spinner('🔄 syncing with NBA Mainframe & Vegas Ledgers...'):
+with st.spinner('🔄 syncing with NBA Mainframe & Vegas Ledgers...'):
     # Use Odds API for EVERYTHING (Bypasses NBA Schedule Block)
-    with st.spinner('🔄 syncing with Market Data...'):
+with st.spinner('🔄 syncing with Market Data...'):
     df, team_ctx, name_to_id, lg_pace, lg_def = get_nba_data()
     market_lines, market_schedule = get_market_data(api_key)
 
