@@ -3,7 +3,8 @@ import pandas as pd
 import requests
 import time
 import random
-# ### NEW: IMPORTS FOR GOOGLE SHEETS ###
+import re 
+# ### IMPORTS FOR GOOGLE SHEETS ###
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 # --------------------------------------
@@ -27,13 +28,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ### NEW: GOOGLE SHEETS CONNECTION FUNCTION ###
+# --- GOOGLE SHEETS CONNECTION ---
 def connect_to_sheet():
     """Connects to the Google Sheet using Streamlit Secrets."""
     try:
-        # Define the scope (what we are allowed to touch)
+        # Define the scope
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        # Load credentials from the secrets file we updated
+        # Load credentials
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
@@ -41,9 +42,85 @@ def connect_to_sheet():
         sheet = client.open("Prop_Auditor_Ledger").sheet1
         return sheet
     except Exception as e:
-        # Silent fail so the app doesn't crash if secrets aren't set up yet
         return None
-# ----------------------------------------------
+
+# --- AUTO-GRADING ENGINE (NEW) ---
+def grade_pending_bets(sheet):
+    """Checks PENDING rows against actual stats and updates the sheet."""
+    try:
+        data = sheet.get_all_records()
+        rows_to_update = []
+        
+        # 1. Identify Dates we need to check (to minimize API calls)
+        pending_dates = set(row['Date'] for row in data if row['Result'] == 'PENDING')
+        
+        if not pending_dates:
+            return "No pending bets to grade."
+
+        stats_cache = {}
+        
+        # 2. Fetch Stats for those dates
+        for date_str in pending_dates:
+            # format date for API (YYYY-MM-DD -> MM/DD/YYYY)
+            try:
+                d_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                fmt_date = d_obj.strftime('%m/%d/%Y')
+                
+                # Fetch actuals for that day
+                stats = leaguedashplayerstats.LeagueDashPlayerStats(
+                    date_from_nullable=fmt_date, 
+                    date_to_nullable=fmt_date, 
+                    season='2025-26', 
+                    per_mode_detailed='PerGame'
+                ).get_data_frames()[0]
+                stats_cache[date_str] = stats
+                time.sleep(0.5) # Be nice to API
+            except:
+                continue
+
+        # 3. Grade the rows
+        updates_made = 0
+        for i, row in enumerate(data):
+            if row['Result'] == 'PENDING':
+                date_str = row['Date']
+                player = row['Player']
+                bet_str = str(row['Bet']) # e.g., "PTS > 14.5 "
+                
+                if date_str not in stats_cache: continue
+                
+                # Find player stats in that day's cache
+                daily_df = stats_cache[date_str]
+                p_stats = daily_df[daily_df['PLAYER_NAME'] == player]
+                
+                if p_stats.empty:
+                    # Player didn't play? Leave PENDING or mark VOID manually
+                    continue
+                
+                # Get actuals
+                act_pts = float(p_stats.iloc[0]['PTS'])
+                act_reb = float(p_stats.iloc[0]['REB'])
+                act_ast = float(p_stats.iloc[0]['AST'])
+                
+                # Parse the Bet String (Regex finds: TYPE > VALUE)
+                conditions = re.findall(r'(PTS|REB|AST) > ([\d\.]+)', bet_str)
+                
+                if not conditions: continue 
+
+                won = True
+                for cat, val in conditions:
+                    target = float(val)
+                    if cat == 'PTS' and act_pts <= target: won = False
+                    elif cat == 'REB' and act_reb <= target: won = False
+                    elif cat == 'AST' and act_ast <= target: won = False
+                
+                # Update Sheet (Row index is i + 2 because of 1-based index + header)
+                result_text = "WIN" if won else "LOSS"
+                sheet.update_cell(i + 2, 6, result_text) # Col 6 is Result
+                updates_made += 1
+                
+        return f"Audit Complete: Graded {updates_made} bets."
+    except Exception as e:
+        return f"Grading Error: {e}"
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -60,17 +137,29 @@ with st.sidebar:
 
     st.divider()
 
-# ### NEW: SIDEBAR HISTORY (READ THE LEDGER) ###
+    # --- SIDEBAR HISTORY (THE VAULT) ---
     st.markdown("### 🏛️ The Vault")
-    sheet = connect_to_sheet() # Connect to Google
+    sheet = connect_to_sheet() 
+    
     if sheet:
+        # --- NEW BUTTON: AUTO GRADE ---
+        if st.button("🔄 Auto-Grade Pending"):
+            with st.spinner("Auditing past performance..."):
+                msg = grade_pending_bets(sheet)
+                if "Error" in msg: 
+                    st.error(msg)
+                else: 
+                    st.success(msg)
+                    time.sleep(2) # Pause so user sees message
+                    st.rerun() # Refresh to update record
+        # ------------------------------
+
         try:
             records = sheet.get_all_records()
             if records:
                 df_hist = pd.DataFrame(records)
                 
-                # --- LOGIC FIX: Ignore 'PENDING' bets ---
-                # Filter for only graded bets
+                # Logic: Filter for graded bets
                 graded = df_hist[df_hist['Result'].isin(['WIN', 'LOSS'])]
                 
                 wins = len(graded[graded['Result'] == 'WIN'])
@@ -81,7 +170,6 @@ with st.sidebar:
                     win_pct = (wins / total) * 100
                     st.metric("All-Time Record", f"{wins}-{losses}", f"{win_pct:.1f}% Win Rate")
                 else:
-                    # Shows when you have bets, but they are all PENDING
                     st.metric("All-Time Record", "0-0", "Pending Results")
             else:
                 st.caption("Ledger is active but empty.")
@@ -89,7 +177,6 @@ with st.sidebar:
             st.caption("Connecting to Ledger...")
     else:
         st.caption("⚠️ Ledger Disconnected")
-    # ---------------------------------------------
     
     st.divider()
     st.markdown("### ⚙️ Audit Settings")
@@ -169,7 +256,7 @@ now_et = datetime.utcnow() - timedelta(hours=5)
 col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
 col2.metric("Market Status", "Live", delta="Open")
 
-# --- EXPLANATION SECTION ---
+# --- EXPLANATION SECTION (Patrick Rogers Style) ---
 with st.expander("📘 Read the Column: How This System Works"):
     st.markdown("""
     ### Let's Be Honest About the Betting Market
@@ -271,7 +358,7 @@ else:
                     
                 if val_add >= min_edge:
                     memo = generate_memo(val_add, signal)
-                    # ### NEW: ADD DATE TO DICTIONARY FOR LEDGER ###
+                    # ADD DATE TO DICTIONARY FOR LEDGER
                     audit_results.append({
                         "Date": today_str,
                         "Player": p['PLAYER_NAME'],
@@ -284,7 +371,6 @@ else:
                         "REB": f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "-",
                         "AST": f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
                     })
-                    # ---------------------------------------------
 
 # --- DISPLAY RESULTS ---
 st.subheader(f"📋 Daily Ledger ({len(audit_results)} Flags Found)")
@@ -308,14 +394,13 @@ if audit_results:
         hide_index=True
     )
     
-    # ### NEW: SAVE TO LEDGER BUTTON ###
+    # SAVE TO LEDGER BUTTON
     if st.button("💾 Commit to Ledger (Google Sheets)"):
         if sheet:
             try:
                 # Loop through results and save to Google
                 for item in audit_results:
                     # Simple check to avoid duplicates (Checks if player name exists in sheet)
-                    # Note: In a real V2, we'd check Date+Player combined
                     existing_data = sheet.findall(item['Player'])
                     
                     # Append Row: Date, Player, Team, Bet, Edge, Result (Pending)
@@ -333,8 +418,5 @@ if audit_results:
                 st.error(f"Error saving to sheet: {e}")
         else:
             st.error("Sheet connection not active. Check Secrets.")
-    # ----------------------------------
 else:
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
-
-
