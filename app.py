@@ -177,7 +177,7 @@ with st.sidebar:
         except:
             st.caption("Connecting to Ledger...")
         else:
-        st.caption("⚠️ Ledger Disconnected")
+            st.caption("⚠️ Ledger Disconnected")
     
     st.divider()
     
