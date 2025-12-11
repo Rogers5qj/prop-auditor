@@ -191,35 +191,47 @@ def get_nba_data():
         return df, team_ctx, name_to_id_map, lg_pace, lg_def
     except: return pd.DataFrame(), {}, {}, 100, 112
 
-def get_market_data(api_key):
-    """Fetches Schedule FIRST, then loops to get Props."""
+def get_market_data(api_key, target_date):
+    """Fetches Schedule FIRST, filters by DATE, then loops to get Props."""
     lines = {}
     schedule = [] 
     
-    # 1. GET SCHEDULE (Main Market Only)
-    # This works to get the list of active games
+    # 1. GET SCHEDULE (Main Market)
     sched_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=h2h&oddsFormat=american&apiKey={api_key}"
     
     try:
         sched_resp = requests.get(sched_url).json()
         
-        # Check for API Errors (like Quota Exceeded)
         if isinstance(sched_resp, dict) and 'message' in sched_resp:
             st.error(f"⚠️ ODDS API ERROR: {sched_resp['message']}")
             return {}, []
             
         if not isinstance(sched_resp, list): return {}, []
 
-        # 2. LOOP THROUGH GAMES TO GET PROPS
-        # We limit this to the first 10 games to protect your quota
-        for game in sched_resp[:10]:
+        # 2. FILTER & LOOP
+        for game in sched_resp:
+            # --- THE BOUNCER (Date Filter) ---
+            # Parse ISO8601 time (e.g. 2025-12-12T00:30:00Z)
+            # We strip the 'Z' and treat as UTC, then subtract 5h for ET
+            try:
+                start_str = game['commence_time'].replace('Z', '')
+                start_dt = datetime.fromisoformat(start_str) - timedelta(hours=5)
+                game_date_str = start_dt.strftime('%Y-%m-%d')
+                
+                # If game date doesn't match target, skip it!
+                if game_date_str != target_date:
+                    continue
+            except:
+                continue # If date parsing fails, skip just to be safe
+            # ---------------------------------
+
             game_id = game['id']
             schedule.append({
                 'home_team': game['home_team'],
                 'away_team': game['away_team']
             })
             
-            # Fetch Props for this specific game
+            # Fetch Props for this SPECIFIC game
             prop_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/events/{game_id}/odds?regions=us&markets=player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
             try:
                 prop_data = requests.get(prop_url).json()
@@ -249,6 +261,7 @@ def get_market_data(api_key):
 
 
 
+
 def generate_memo(edge, signal):
     if edge >= 5.0: return "🚨 MATERIAL ERROR: Market Asleep."
     if "ELITE" in signal and edge > 2.0: return "⭐ STAR ASSET: Undervalued."
@@ -266,7 +279,9 @@ col2.metric("Market Status", "Live", delta="Open")
 # Use Odds API for EVERYTHING (Bypasses NBA Schedule Block)
 with st.spinner('🔄 syncing with Market Data...'):
     df, team_ctx, name_to_id, lg_pace, lg_def = get_nba_data()
-    market_lines, market_schedule = get_market_data(api_key)
+    # We pass 'today_str' so the function knows which games to keep
+    market_lines, market_schedule = get_market_data(api_key, today_str)
+
 
 col3.metric("Active Lines", len(market_lines))
 
