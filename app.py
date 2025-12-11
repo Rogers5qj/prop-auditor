@@ -295,16 +295,16 @@ if not games.empty and not df.empty:
                 if val_add >= min_edge or show_all:
                     memo = generate_memo(val_add, signal)
                     audit_results.append({ ... })
-                        "Date": today_str,
-                        "Player": p['PLAYER_NAME'],
-                        "Team": team_ctx.get(tid,{}).get('Name','UNK'),
-                        "Signal": signal,
-                        "Manager Memo": memo,
-                        "Bet": bet_str,
-                        "Edge": round(val_add, 1),
-                        "PTS": f"{round(proj_pts,1)} ({l_pts})" if l_pts!=999 else "-",
-                        "REB": f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "-",
-                        "AST": f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
+                    "Date": today_str,
+                    "Player": p['PLAYER_NAME'],
+                    "Team": team_ctx.get(tid,{}).get('Name','UNK'),
+                    "Signal": signal,
+                    "Manager Memo": memo,
+                    "Bet": bet_str,
+                    "Edge": round(val_add, 1),
+                    "PTS": f"{round(proj_pts,1)} ({l_pts})" if l_pts!=999 else "-",
+                    "REB": f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "-",
+                    "AST": f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
                     })
 
 st.subheader(f"📋 Daily Ledger ({len(audit_results)} Flags Found)")
