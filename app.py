@@ -191,6 +191,8 @@ def get_nba_data():
         return df, team_ctx, name_to_id_map, lg_pace, lg_def
     except: return pd.DataFrame(), {}, {}, 100, 112
 
+
+@st.cache_data(ttl=1800, show_spinner=False) # <--- ADD THIS LINE (30 Min Buffer)
 def get_market_data(api_key, target_date):
     """Fetches Schedule FIRST, filters by DATE, then loops to get Props."""
     lines = {}
