@@ -30,11 +30,12 @@ with st.sidebar:
     st.divider()
     
     # PRODUCT MODE: Checks for secret key first
-if "ODDS_API_KEY" in st.secrets:
-    api_key = st.secrets["ODDS_API_KEY"]
-    st.success("🔐 License Key Active")
-else:
-    api_key = st.text_input("Odds API Key", type="password")
+    # FIX: This block is now indented to stay inside the sidebar
+    if "ODDS_API_KEY" in st.secrets:
+        api_key = st.secrets["ODDS_API_KEY"]
+        st.success("🔐 License Key Active")
+    else:
+        api_key = st.text_input("Odds API Key", type="password")
     
     st.divider()
     st.markdown("### ⚙️ Audit Settings")
@@ -113,7 +114,9 @@ def generate_memo(edge, signal):
 
 # 1. Header Metrics
 col1, col2, col3 = st.columns(3)
-col1.metric("Audit Date", datetime.now().strftime('%Y-%m-%d'))
+# Update time to show ET
+now_et = datetime.now(timedelta(hours=-5))
+col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
 col2.metric("Market Status", "Live", delta="Open")
 
 # 2. Loading State
@@ -228,5 +231,4 @@ if audit_results:
         hide_index=True
     )
 else:
-
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
