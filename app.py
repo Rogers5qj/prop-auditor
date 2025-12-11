@@ -291,9 +291,10 @@ if not games.empty and not df.empty:
                 if proj_reb > (l_reb + 1.5): val_add += (proj_reb - l_reb); bet_str += f"REB > {l_reb} "
                 if proj_ast > (l_ast + 1.5): val_add += (proj_ast - l_ast); bet_str += f"AST > {l_ast} "
                 
-                if val_add >= min_edge:
-                    memo = generate_memo(val_add, signal)
-                    audit_results.append({
+                # New Logic: Keep if it beats minimum OR if user wants to see everything
+                if val_add >= min_edge or show_all:
+                memo = generate_memo(val_add, signal)
+                audit_results.append({ ... })
                         "Date": today_str,
                         "Player": p['PLAYER_NAME'],
                         "Team": team_ctx.get(tid,{}).get('Name','UNK'),
@@ -316,12 +317,15 @@ if audit_results:
         "Edge": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=10),
     }, use_container_width=True, hide_index=True)
     
-    if st.button("💾 Commit to Ledger (Google Sheets)"):
+        if st.button("💾 Commit to Ledger (Google Sheets)"):
         if sheet:
             try:
                 for item in audit_results:
-                    existing = sheet.findall(item['Player'])
-                    sheet.append_row([item['Date'], item['Player'], item['Team'], item['Bet'], item['Edge'], "PENDING"])
+                    # SAFETY CHECK: Only save if the edge is actually good.
+                    # This prevents "Show All" garbage from polluting your sheet.
+                    if item['Edge'] >= min_edge: 
+                        existing = sheet.findall(item['Player'])
+                        sheet.append_row([item['Date'], item['Player'], item['Team'], item['Bet'], item['Edge'], "PENDING"])
                 st.success("✅ Successfully updated the Master Ledger!"); st.balloons()
             except Exception as e: st.error(f"Error saving to sheet: {e}")
         else: st.error("Sheet connection not active. Check Secrets.")
