@@ -218,7 +218,7 @@ def get_market_data(api_key):
                             if out['description'] not in lines: lines[out['description']] = {}
                             lines[out['description']][m_key] = out['point']
         return lines, schedule
-    except: return {}, []
+        except: return {}, []
 
 def generate_memo(edge, signal):
     if edge >= 5.0: return "🚨 MATERIAL ERROR: Market Asleep."
