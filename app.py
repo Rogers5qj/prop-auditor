@@ -199,12 +199,12 @@ def get_market_data(api_key):
     lines = {}
     schedule = [] # List of games found in the market
         
-        if isinstance(resp, list):
-            for game in resp:
+    if isinstance(resp, list):
+        for game in resp:
                 # 1. Build Schedule from Odds API
-                schedule.append({
-                    'home_team': game['home_team'],
-                    'away_team': game['away_team']
+            schedule.append({
+                'home_team': game['home_team'],
+                'away_team': game['away_team']
                 })
                 
                 # 2. Extract Lines
