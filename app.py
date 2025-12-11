@@ -196,8 +196,8 @@ def get_market_data(api_key):
     # FIX: Added 'h2h,' so the schedule loads even if props are down
     url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=h2h,player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
     resp = requests.get(url).json()
-        lines = {}
-        schedule = [] # List of games found in the market
+    lines = {}
+    schedule = [] # List of games found in the market
         
         if isinstance(resp, list):
             for game in resp:
