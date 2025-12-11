@@ -7,7 +7,7 @@ import re
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
-from nba_api.stats.endpoints import leaguedashteamstats, leaguedashplayerstats, scoreboard, commonteamroster
+from nba_api.stats.endpoints import leaguedashteamstats, leaguedashplayerstats, scoreboardv2, commonteamroster
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="The Prop Auditor", page_icon="🧾", layout="wide", initial_sidebar_state="expanded")
@@ -269,7 +269,7 @@ col3.metric("Active Lines", len(market_lines))
 
 audit_results = []
 today_str = (datetime.utcnow() - timedelta(hours=5)).strftime('%Y-%m-%d')
-try: games = scoreboard.Scoreboard(game_date=today_str).game_header.get_data_frame()
+try: games = scoreboardv2.Scoreboardv2(game_date=today_str).game_header.get_data_frame()
 except: games = pd.DataFrame()
     # --- DEBUG DIAGNOSTICS (PASTE THIS HERE) ---
 with st.expander("🛠️ System Diagnostics (Why is it empty?)"):
