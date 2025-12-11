@@ -119,6 +119,26 @@ now_et = datetime.utcnow() - timedelta(hours=5)
 col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
 col2.metric("Market Status", "Live", delta="Open")
 
+# --- EXPLANATION SECTION ---
+with st.expander("📘 How to Read the Audit (Methodology)"):
+    st.markdown("""
+    **The Prop Auditor** does not "predict" games. It treats sports betting like a financial audit.
+    
+    1.  **The Asset Valuation (Internal Projection):** We calculate a player's "True Value" using a 4-pillar accounting method:
+        * **The Usage Void:** When players are out, their stats don't disappear—they are reallocated. We calculate exactly who absorbs that volume.
+        * **Pace & Efficiency:** We adjust for the speed of the game and the opponent's defensive rating (DrTg).
+        * **Recent Form:** We weigh recent performance against season averages to detect "Hot Hand" anomalies vs. sustainable trends.
+    
+    2.  **The Liability Check (Market Line):**
+        We cross-reference our valuation against the live lines posted by DraftKings. 
+    
+    3.  **The Audit (The Signal):**
+        We only flag a play if the discrepancy is mathematically significant (an "Accounting Error").
+        * **ELITE:** High usage player in a fast-paced, low-defense matchup. (High Conviction).
+        * **GAMBLER:** High variance plays (usually defensive stats like Steals/Blocks). High risk, high reward.
+        * **ANCHOR:** Consistent role players with a safe floor. Good for "Cash" plays.
+    """)
+    
 # 2. Loading State
 with st.spinner('🔄 syncing with NBA Mainframe & Vegas Ledgers...'):
     df, team_ctx, lg_pace, lg_def = get_nba_data()
@@ -232,4 +252,5 @@ if audit_results:
     )
 else:
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
+
 
