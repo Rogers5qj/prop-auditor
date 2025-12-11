@@ -195,30 +195,34 @@ def get_market_data(api_key):
     """Fetches BOTH lines AND the schedule from the Odds API."""
     # FIX: Added 'h2h,' so the schedule loads even if props are down
     url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=h2h,player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
-    resp = requests.get(url).json()
-    lines = {}
-    schedule = [] # List of games found in the market
-        
-    if isinstance(resp, list):
-        for game in resp:
+    
+    try:
+        resp = requests.get(url).json()
+        lines = {}
+        schedule = [] # List of games found in the market
+            
+        if isinstance(resp, list):
+            for game in resp:
                 # 1. Build Schedule from Odds API
-            schedule.append({
-                'home_team': game['home_team'],
-                'away_team': game['away_team']
+                schedule.append({
+                    'home_team': game['home_team'],
+                    'away_team': game['away_team']
                 })
-                
+                    
                 # 2. Extract Lines
-            book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
-            if not book and game.get('bookmakers'): book = game['bookmakers'][0]
-            if book:
-                for m in book.get('markets', []):
-                    m_key = 'PTS' if 'points' in m['key'] else 'REB' if 'rebounds' in m['key'] else 'AST'
-                    for out in m.get('outcomes', []):
-                        if out.get('point'):
-                            if out['description'] not in lines: lines[out['description']] = {}
-                            lines[out['description']][m_key] = out['point']
+                book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
+                if not book and game.get('bookmakers'): book = game['bookmakers'][0]
+                if book:
+                    for m in book.get('markets', []):
+                        m_key = 'PTS' if 'points' in m['key'] else 'REB' if 'rebounds' in m['key'] else 'AST'
+                        for out in m.get('outcomes', []):
+                            if out.get('point'):
+                                if out['description'] not in lines: lines[out['description']] = {}
+                                lines[out['description']][m_key] = out['point']
         return lines, schedule
-        except: return {}, []
+    except: 
+        return {}, []
+
 
 def generate_memo(edge, signal):
     if edge >= 5.0: return "🚨 MATERIAL ERROR: Market Asleep."
