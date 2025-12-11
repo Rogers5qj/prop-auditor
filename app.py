@@ -268,7 +268,8 @@ with st.spinner('🔄 syncing with NBA Mainframe & Vegas Ledgers...'):
 col3.metric("Active Lines", len(market_lines))
 
 audit_results = []
-today_str = (datetime.utcnow() - timedelta(hours=5)).strftime('%Y-%m-%d')
+# UPDATE: Use the date from the sidebar instead of hardcoding "Now"
+today_str = selected_date.strftime('%Y-%m-%d')
 try: games = scoreboardv2.Scoreboardv2(game_date=today_str).game_header.get_data_frame()
 except: games = pd.DataFrame()
     # --- DEBUG DIAGNOSTICS (PASTE THIS HERE) ---
