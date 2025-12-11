@@ -203,12 +203,36 @@ with st.sidebar:
 # --- FUNCTIONS (ENGINE) ---
 @st.cache_data(ttl=3600)
 def get_nba_data():
+    """Fetches NBA player stats and creates a Name->ID map."""
     try:
+        # 1. Team Stats
         team_stats = leaguedashteamstats.LeagueDashTeamStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
         if 'PACE' not in team_stats.columns: team_stats.rename(columns={'Pace': 'PACE'}, inplace=True)
         if 'DEF_RATING' not in team_stats.columns: team_stats.rename(columns={'DefRtg': 'DEF_RATING'}, inplace=True)
+        
+        # Create Maps
         team_ctx = {row['TEAM_ID']: {'Name': row['TEAM_NAME'], 'Pace': row['PACE'], 'DefRtg': row['DEF_RATING']} for _, row in team_stats.iterrows()}
+        # NEW: Name to ID Map (Crucial for linking Odds API to NBA API)
+        name_to_id_map = {row['TEAM_NAME']: row['TEAM_ID'] for _, row in team_stats.iterrows()}
+        # Manual Fix for Clippers (Common mismatch)
+        name_to_id_map['LA Clippers'] = 1610612746
+        name_to_id_map['Los Angeles Clippers'] = 1610612746
+        
         lg_pace = team_stats['PACE'].mean(); lg_def = team_stats['DEF_RATING'].mean()
+
+        # 2. Player Stats
+        base = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Base', per_mode_detailed='PerGame').get_data_frames()[0]
+        adv = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
+        df = pd.merge(base[['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'MIN', 'GP', 'PTS', 'REB', 'AST', 'STL', 'BLK']], adv[['PLAYER_ID', 'DEF_RATING', 'USG_PCT']], on='PLAYER_ID')
+        
+        # 3. L5 Stats
+        l5 = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', last_n_games=5, per_mode_detailed='PerGame').get_data_frames()[0]
+        l5 = l5[['PLAYER_ID', 'PTS', 'REB', 'AST']].rename(columns={'PTS': 'L5_PTS', 'REB': 'L5_REB', 'AST': 'L5_AST'})
+        df = pd.merge(df, l5, on='PLAYER_ID', how='left')
+        
+        return df, team_ctx, name_to_id_map, lg_pace, lg_def
+    except: return pd.DataFrame(), {}, {}, 100, 112
+
 
         base = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Base', per_mode_detailed='PerGame').get_data_frames()[0]
         adv = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
@@ -220,13 +244,23 @@ def get_nba_data():
         return df, team_ctx, lg_pace, lg_def
     except: return pd.DataFrame(), {}, 100, 112
 
-def get_market_lines(api_key):
+def get_market_data(api_key):
+    """Fetches BOTH lines AND the schedule from the Odds API."""
     url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
     try:
         resp = requests.get(url).json()
         lines = {}
+        schedule = [] # List of games found in the market
+        
         if isinstance(resp, list):
             for game in resp:
+                # 1. Build Schedule from Odds API
+                schedule.append({
+                    'home_team': game['home_team'],
+                    'away_team': game['away_team']
+                })
+                
+                # 2. Extract Lines
                 book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
                 if not book and game.get('bookmakers'): book = game['bookmakers'][0]
                 if book:
@@ -236,8 +270,8 @@ def get_market_lines(api_key):
                             if out.get('point'):
                                 if out['description'] not in lines: lines[out['description']] = {}
                                 lines[out['description']][m_key] = out['point']
-        return lines
-    except: return {}
+        return lines, schedule
+    except: return {}, []
 
 def generate_memo(edge, signal):
     if edge >= 5.0: return "🚨 MATERIAL ERROR: Market Asleep."
@@ -262,34 +296,34 @@ with st.expander("📘 Read the Column: How This System Works"):
     """)
 
 with st.spinner('🔄 syncing with NBA Mainframe & Vegas Ledgers...'):
-    df, team_ctx, lg_pace, lg_def = get_nba_data()
-    market_lines = get_market_lines(api_key)
+    # Use Odds API for EVERYTHING (Bypasses NBA Schedule Block)
+with st.spinner('🔄 syncing with Market Data...'):
+    df, team_ctx, name_to_id, lg_pace, lg_def = get_nba_data()
+    market_lines, market_schedule = get_market_data(api_key)
 
 col3.metric("Active Lines", len(market_lines))
 
 audit_results = []
-# UPDATE: Use the date from the sidebar instead of hardcoding "Now"
-today_str = selected_date.strftime('%Y-%m-%d')
-try: games = scoreboardv2.Scoreboardv2(game_date=today_str).game_header.get_data_frame()
-except: games = pd.DataFrame()
-    # --- DEBUG DIAGNOSTICS (PASTE THIS HERE) ---
-with st.expander("🛠️ System Diagnostics (Why is it empty?)"):
-    st.write(f"**Target Date:** {today_str}")
-    st.write(f"**Games Found:** {len(games)}")
-    st.write(f"**Players Loaded:** {len(df)}")
-    
-    if games.empty:
-        st.error("❌ NBA API returned 0 games. The Schedule might be empty or the API is down.")
-    else:
-        st.success(f"✅ NBA API is working. Found {len(games)} games.")
-        st.dataframe(games) # Show us the raw game data
-# -------------------------------------------
-if not games.empty and not df.empty:
-    for game in games.to_dict('records'):
-        h_id, v_id = game['HOME_TEAM_ID'], game['VISITOR_TEAM_ID']
+
+# --- NEW ENGINE: LOOP THROUGH ODDS API SCHEDULE ---
+if market_schedule and not df.empty:
+    for game in market_schedule:
+        # Convert Names to IDs
+        h_name = game['home_team']
+        v_name = game['away_team']
+        
+        # Safe Lookup using the map we built in Change 1
+        h_id = name_to_id.get(h_name, 0)
+        v_id = name_to_id.get(v_name, 0)
+        
+        if h_id == 0 or v_id == 0:
+            continue # Skip if name mismatch
+            
         for tid in [h_id, v_id]:
             oid = v_id if tid == h_id else h_id
             is_home = (tid == h_id)
+            
+            # (Rest of logic is identical to before)
             pace_factor = ((team_ctx.get(tid,{}).get('Pace',100) + team_ctx.get(oid,{}).get('Pace',100))/2) / lg_pace
             def_factor = team_ctx.get(oid,{}).get('DefRtg',112) / lg_def
             roster = df[df['TEAM_ID'] == tid].sort_values('MIN', ascending=False).head(9)
@@ -315,20 +349,19 @@ if not games.empty and not df.empty:
                 if proj_reb > (l_reb + 1.5): val_add += (proj_reb - l_reb); bet_str += f"REB > {l_reb} "
                 if proj_ast > (l_ast + 1.5): val_add += (proj_ast - l_ast); bet_str += f"AST > {l_ast} "
                 
-                # New Logic: Keep if it beats minimum OR if user wants to see everything
                 if val_add >= min_edge or show_all:
                     memo = generate_memo(val_add, signal)
                     audit_results.append({
-                    "Date": today_str,
-                    "Player": p['PLAYER_NAME'],
-                    "Team": team_ctx.get(tid,{}).get('Name','UNK'),
-                    "Signal": signal,
-                    "Manager Memo": memo,
-                    "Bet": bet_str,
-                    "Edge": round(val_add, 1),
-                    "PTS": f"{round(proj_pts,1)} ({l_pts})" if l_pts!=999 else "-",
-                    "REB": f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "-",
-                    "AST": f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
+                        "Date": today_str,
+                        "Player": p['PLAYER_NAME'],
+                        "Team": team_ctx.get(tid,{}).get('Name','UNK'),
+                        "Signal": signal,
+                        "Manager Memo": memo,
+                        "Bet": bet_str,
+                        "Edge": round(val_add, 1),
+                        "PTS": f"{round(proj_pts,1)} ({l_pts})" if l_pts!=999 else "-",
+                        "REB": f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "-",
+                        "AST": f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
                     })
 
 st.subheader(f"📋 Daily Ledger ({len(audit_results)} Flags Found)")
