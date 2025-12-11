@@ -29,7 +29,12 @@ with st.sidebar:
     st.markdown("*Financial Rigor for Sports Betting*")
     st.divider()
     
-    api_key = st.text_input("Odds API Key", type="password", help="Paste your key from the-odds-api.com")
+    # PRODUCT MODE: Checks for secret key first
+if "ODDS_API_KEY" in st.secrets:
+    api_key = st.secrets["ODDS_API_KEY"]
+    st.success("🔐 License Key Active")
+else:
+    api_key = st.text_input("Odds API Key", type="password")
     
     st.divider()
     st.markdown("### ⚙️ Audit Settings")
@@ -223,4 +228,5 @@ if audit_results:
         hide_index=True
     )
 else:
+
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
