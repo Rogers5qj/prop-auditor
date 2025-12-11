@@ -60,17 +60,17 @@ with st.sidebar:
 
     st.divider()
 
-    # ### NEW: SIDEBAR HISTORY (READ THE LEDGER) ###
+# ### NEW: SIDEBAR HISTORY (READ THE LEDGER) ###
     st.markdown("### 🏛️ The Vault")
     sheet = connect_to_sheet() # Connect to Google
-if sheet:
+    if sheet:
         try:
             records = sheet.get_all_records()
             if records:
                 df_hist = pd.DataFrame(records)
                 
                 # --- LOGIC FIX: Ignore 'PENDING' bets ---
-                # We create a new filtered list called 'graded' that only has finished bets
+                # Filter for only graded bets
                 graded = df_hist[df_hist['Result'].isin(['WIN', 'LOSS'])]
                 
                 wins = len(graded[graded['Result'] == 'WIN'])
@@ -81,12 +81,10 @@ if sheet:
                     win_pct = (wins / total) * 100
                     st.metric("All-Time Record", f"{wins}-{losses}", f"{win_pct:.1f}% Win Rate")
                 else:
-                    # This shows when you have bets in the sheet, but they are all PENDING
+                    # Shows when you have bets, but they are all PENDING
                     st.metric("All-Time Record", "0-0", "Pending Results")
-        except:
-            st.caption("Connecting to Ledger...")
-                else:
-                    st.caption("Ledger is active but empty.")
+            else:
+                st.caption("Ledger is active but empty.")
         except:
             st.caption("Connecting to Ledger...")
     else:
@@ -338,4 +336,5 @@ if audit_results:
     # ----------------------------------
 else:
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
+
 
