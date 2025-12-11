@@ -4,20 +4,13 @@ import requests
 import time
 import random
 import re 
-# ### IMPORTS FOR GOOGLE SHEETS ###
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-# --------------------------------------
 from datetime import datetime, timedelta
 from nba_api.stats.endpoints import leaguedashteamstats, leaguedashplayerstats, scoreboardv2, commonteamroster
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="The Prop Auditor",
-    page_icon="🧾",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="The Prop Auditor", page_icon="🧾", layout="wide", initial_sidebar_state="expanded")
 
 # --- STYLING ---
 st.markdown("""
@@ -30,81 +23,81 @@ st.markdown("""
 
 # --- GOOGLE SHEETS CONNECTION ---
 def connect_to_sheet():
-    """Connects to the Google Sheet using Streamlit Secrets."""
     try:
-        # Define the scope
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        # Load credentials
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        # Open the specific sheet
-        sheet = client.open("Prop_Auditor_Ledger").sheet1
-        return sheet
-    except Exception as e:
-        return None
+        return client.open("Prop_Auditor_Ledger").sheet1
+    except: return None
 
-# --- AUTO-GRADING ENGINE (NEW) ---
+# --- AUTO-GRADING ENGINE (ROBUST V7) ---
 def grade_pending_bets(sheet):
     """Checks PENDING rows against actual stats and updates the sheet."""
     try:
         data = sheet.get_all_records()
-        rows_to_update = []
+        if not data: return "Sheet is empty."
         
-        # 1. Identify Dates we need to check (to minimize API calls)
-        pending_dates = set(row['Date'] for row in data if row['Result'] == 'PENDING')
-        
-        if not pending_dates:
-            return "No pending bets to grade."
-
+        updates_made = 0
         stats_cache = {}
         
-        # 2. Fetch Stats for those dates
-        for date_str in pending_dates:
-            # format date for API (YYYY-MM-DD -> MM/DD/YYYY)
-            try:
-                d_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                fmt_date = d_obj.strftime('%m/%d/%Y')
-                
-                # Fetch actuals for that day
-                stats = leaguedashplayerstats.LeagueDashPlayerStats(
-                    date_from_nullable=fmt_date, 
-                    date_to_nullable=fmt_date, 
-                    season='2025-26', 
-                    per_mode_detailed='PerGame'
-                ).get_data_frames()[0]
-                stats_cache[date_str] = stats
-                time.sleep(0.5) # Be nice to API
-            except:
-                continue
-
-        # 3. Grade the rows
-        updates_made = 0
+        # Loop through every row
         for i, row in enumerate(data):
             if row['Result'] == 'PENDING':
-                date_str = row['Date']
+                date_str = str(row['Date']).strip()
                 player = row['Player']
-                bet_str = str(row['Bet']) # e.g., "PTS > 14.5 "
+                bet_str = str(row['Bet'])
                 
-                if date_str not in stats_cache: continue
+                # 1. ROBUST DATE PARSING
+                d_obj = None
+                for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%Y/%m/%d', '%m-%d-%Y'):
+                    try:
+                        d_obj = datetime.strptime(date_str, fmt)
+                        break
+                    except: continue
                 
-                # Find player stats in that day's cache
-                daily_df = stats_cache[date_str]
-                p_stats = daily_df[daily_df['PLAYER_NAME'] == player]
-                
-                if p_stats.empty:
-                    # Player didn't play? Leave PENDING or mark VOID manually
+                if not d_obj:
+                    st.error(f"❌ Date Error: Could not read '{date_str}' for {player}")
                     continue
                 
-                # Get actuals
+                fmt_date = d_obj.strftime('%m/%d/%Y') # Format API expects
+                cache_key = d_obj.strftime('%Y-%m-%d')
+                
+                # 2. Fetch Stats (Cache to save time)
+                if cache_key not in stats_cache:
+                    try:
+                        stats = leaguedashplayerstats.LeagueDashPlayerStats(
+                            date_from_nullable=fmt_date, 
+                            date_to_nullable=fmt_date, 
+                            season='2025-26', 
+                            per_mode_detailed='PerGame'
+                        ).get_data_frames()[0]
+                        stats_cache[cache_key] = stats
+                        time.sleep(0.2) # Polite API pause
+                    except:
+                        st.warning(f"⚠️ No API data found for {fmt_date}")
+                        stats_cache[cache_key] = pd.DataFrame()
+                
+                # 3. Find Player
+                daily_df = stats_cache[cache_key]
+                if daily_df.empty: continue
+                
+                p_stats = daily_df[daily_df['PLAYER_NAME'] == player]
+                if p_stats.empty:
+                    # Player didn't play that day
+                    continue
+                
+                # 4. Get Actuals
                 act_pts = float(p_stats.iloc[0]['PTS'])
                 act_reb = float(p_stats.iloc[0]['REB'])
                 act_ast = float(p_stats.iloc[0]['AST'])
                 
-                # Parse the Bet String (Regex finds: TYPE > VALUE)
-                conditions = re.findall(r'(PTS|REB|AST) > ([\d\.]+)', bet_str)
+                # 5. Check Bet (Flexible Regex: allows spaces or no spaces)
+                conditions = re.findall(r'(PTS|REB|AST)\s*>\s*([\d\.]+)', bet_str)
                 
-                if not conditions: continue 
+                if not conditions:
+                    st.warning(f"⚠️ Could not read bet: '{bet_str}'")
+                    continue
 
                 won = True
                 for cat, val in conditions:
@@ -113,9 +106,10 @@ def grade_pending_bets(sheet):
                     elif cat == 'REB' and act_reb <= target: won = False
                     elif cat == 'AST' and act_ast <= target: won = False
                 
-                # Update Sheet (Row index is i + 2 because of 1-based index + header)
+                # 6. Update Sheet
                 result_text = "WIN" if won else "LOSS"
-                sheet.update_cell(i + 2, 6, result_text) # Col 6 is Result
+                # Row index is i + 2 (1 for 0-index, 1 for header)
+                sheet.update_cell(i + 2, 6, result_text) 
                 updates_made += 1
                 
         return f"Audit Complete: Graded {updates_made} bets."
@@ -128,7 +122,6 @@ with st.sidebar:
     st.markdown("*Financial Rigor for Sports Betting*")
     st.divider()
     
-    # API KEY CHECK
     if "ODDS_API_KEY" in st.secrets:
         api_key = st.secrets["ODDS_API_KEY"]
         st.success("🔐 License Key Active")
@@ -137,35 +130,29 @@ with st.sidebar:
 
     st.divider()
 
-    # --- SIDEBAR HISTORY (THE VAULT) ---
+    # --- VAULT (HISTORY) ---
     st.markdown("### 🏛️ The Vault")
     sheet = connect_to_sheet() 
     
     if sheet:
-        # --- NEW BUTTON: AUTO GRADE ---
+        # AUTO GRADE BUTTON
         if st.button("🔄 Auto-Grade Pending"):
             with st.spinner("Auditing past performance..."):
                 msg = grade_pending_bets(sheet)
-                if "Error" in msg: 
-                    st.error(msg)
+                if "Error" in msg: st.error(msg)
                 else: 
                     st.success(msg)
-                    time.sleep(2) # Pause so user sees message
-                    st.rerun() # Refresh to update record
-        # ------------------------------
+                    time.sleep(2)
+                    st.rerun()
 
         try:
             records = sheet.get_all_records()
             if records:
                 df_hist = pd.DataFrame(records)
-                
-                # Logic: Filter for graded bets
                 graded = df_hist[df_hist['Result'].isin(['WIN', 'LOSS'])]
-                
                 wins = len(graded[graded['Result'] == 'WIN'])
                 total = len(graded)
                 losses = total - wins
-                
                 if total > 0:
                     win_pct = (wins / total) * 100
                     st.metric("All-Time Record", f"{wins}-{losses}", f"{win_pct:.1f}% Win Rate")
@@ -181,45 +168,33 @@ with st.sidebar:
     st.divider()
     st.markdown("### ⚙️ Audit Settings")
     min_edge = st.slider("Min Edge (Units)", 1.0, 10.0, 2.0, 0.5)
-    show_all = st.checkbox("Show All Audits", value=False, help="Uncheck to hide 'Low Priority' plays")
+    show_all = st.checkbox("Show All Audits", value=False)
     
     if not api_key:
         st.warning("⚠️ Please enter API Key to begin.")
         st.stop()
 
-# --- FUNCTIONS (The Engine) ---
-
+# --- FUNCTIONS (ENGINE) ---
 @st.cache_data(ttl=3600)
 def get_nba_data():
-    """Fetches and caches NBA stats for 1 hour."""
     try:
-        # 1. Team Stats
         team_stats = leaguedashteamstats.LeagueDashTeamStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
         if 'PACE' not in team_stats.columns: team_stats.rename(columns={'Pace': 'PACE'}, inplace=True)
         if 'DEF_RATING' not in team_stats.columns: team_stats.rename(columns={'DefRtg': 'DEF_RATING'}, inplace=True)
-        
         team_ctx = {row['TEAM_ID']: {'Name': row['TEAM_NAME'], 'Pace': row['PACE'], 'DefRtg': row['DEF_RATING']} for _, row in team_stats.iterrows()}
-        lg_pace = team_stats['PACE'].mean()
-        lg_def = team_stats['DEF_RATING'].mean()
+        lg_pace = team_stats['PACE'].mean(); lg_def = team_stats['DEF_RATING'].mean()
 
-        # 2. Player Stats
         base = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Base', per_mode_detailed='PerGame').get_data_frames()[0]
         adv = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
+        df = pd.merge(base[['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'MIN', 'GP', 'PTS', 'REB', 'AST', 'STL', 'BLK']], adv[['PLAYER_ID', 'DEF_RATING', 'USG_PCT']], on='PLAYER_ID')
         
-        df = pd.merge(base[['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'MIN', 'GP', 'PTS', 'REB', 'AST', 'STL', 'BLK']], 
-                      adv[['PLAYER_ID', 'DEF_RATING', 'USG_PCT']], on='PLAYER_ID')
-        
-        # 3. L5 Stats
         l5 = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', last_n_games=5, per_mode_detailed='PerGame').get_data_frames()[0]
         l5 = l5[['PLAYER_ID', 'PTS', 'REB', 'AST']].rename(columns={'PTS': 'L5_PTS', 'REB': 'L5_REB', 'AST': 'L5_AST'})
         df = pd.merge(df, l5, on='PLAYER_ID', how='left')
-
         return df, team_ctx, lg_pace, lg_def
-    except:
-        return pd.DataFrame(), {}, 100, 112
+    except: return pd.DataFrame(), {}, 100, 112
 
 def get_market_lines(api_key):
-    """Fetches live odds from The Odds API."""
     url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
     try:
         resp = requests.get(url).json()
@@ -227,8 +202,7 @@ def get_market_lines(api_key):
         if isinstance(resp, list):
             for game in resp:
                 book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
-                if not book and game.get('bookmakers'): book = game['bookmakers'][0] # Fallback
-                
+                if not book and game.get('bookmakers'): book = game['bookmakers'][0]
                 if book:
                     for m in book.get('markets', []):
                         m_key = 'PTS' if 'points' in m['key'] else 'REB' if 'rebounds' in m['key'] else 'AST'
@@ -237,20 +211,16 @@ def get_market_lines(api_key):
                                 if out['description'] not in lines: lines[out['description']] = {}
                                 lines[out['description']][m_key] = out['point']
         return lines
-    except:
-        return {}
+    except: return {}
 
 def generate_memo(edge, signal):
-    """The Manager Persona Logic"""
     if edge >= 5.0: return "🚨 MATERIAL ERROR: Market Asleep."
     if "ELITE" in signal and edge > 2.0: return "⭐ STAR ASSET: Undervalued."
     if "GAMBLER" in signal: return "⚠️ HIGH RISK: Variance Warning."
     if edge >= 2.0: return "✅ AUDIT APPROVED: Solid Trends."
     return "📉 LOW PRIORITY: Minor Edge."
 
-# --- MAIN APP LOGIC ---
-
-# 1. Header Metrics
+# --- MAIN APP ---
 col1, col2, col3 = st.columns(3)
 now_et = datetime.utcnow() - timedelta(hours=5)
 col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
@@ -279,86 +249,51 @@ with st.expander("📘 Read the Column: How This System Works"):
     * **GAMBLER:** The high-risk, high-reward swing. Usually involves defensive stats like Steals or Blocks that are volatile by nature. Proceed with caution.
     * **ANCHOR:** The reliable veteran. Consistent role players with a safe floor. Good for keeping the ledger in the green.
     """)
-    
-# 2. Loading State
+
 with st.spinner('🔄 syncing with NBA Mainframe & Vegas Ledgers...'):
     df, team_ctx, lg_pace, lg_def = get_nba_data()
     market_lines = get_market_lines(api_key)
 
-if df.empty:
-    st.error("NBA Data Offline. Try again later.")
-    st.stop()
-
 col3.metric("Active Lines", len(market_lines))
 
-# 3. The Calculation Loop (Hidden Engine)
 audit_results = []
 today_str = (datetime.utcnow() - timedelta(hours=5)).strftime('%Y-%m-%d')
+try: games = scoreboardv2.ScoreboardV2(game_date=today_str).game_header.get_data_frame()
+except: games = pd.DataFrame()
 
-try:
-    games = scoreboardv2.ScoreboardV2(game_date=today_str).game_header.get_data_frame()
-except:
-    games = pd.DataFrame()
-
-if games.empty:
-    st.warning("No NBA Games Scheduled Today.")
-else:
-    # --- START ENGINE ---
+if not games.empty and not df.empty:
     for game in games.to_dict('records'):
         h_id, v_id = game['HOME_TEAM_ID'], game['VISITOR_TEAM_ID']
-        
         for tid in [h_id, v_id]:
             oid = v_id if tid == h_id else h_id
             is_home = (tid == h_id)
-            
-            # Team Context
             pace_factor = ((team_ctx.get(tid,{}).get('Pace',100) + team_ctx.get(oid,{}).get('Pace',100))/2) / lg_pace
             def_factor = team_ctx.get(oid,{}).get('DefRtg',112) / lg_def
-            
-            # Roster Scan
             roster = df[df['TEAM_ID'] == tid].sort_values('MIN', ascending=False).head(9)
             
             for _, p in roster.iterrows():
                 if p['MIN'] < 12: continue
-                
-                # Factors
                 home_factor = 1.03 if (is_home and p['USG_PCT'] < 0.20) else 1.0
-                
-                # Signal
                 signal = "-"
                 dos = (p['STL']*2.5) + (p['BLK']*2.0)
                 if dos > 3.0: signal = "GAMBLER"
                 fantasy = p['PTS'] + 1.2*p['REB'] + 1.5*p['AST'] + 3*p['STL'] + 3*p['BLK']
                 if fantasy > 45: signal = "ELITE"
                 
-                # Projection
                 total_mult = pace_factor * def_factor * home_factor
-                proj_pts = p['PTS'] * total_mult # Using simplified Base since weighted is complex
+                proj_pts = p['PTS'] * total_mult
                 proj_reb = p['REB'] * total_mult
                 proj_ast = p['AST'] * total_mult
-                
-                # Market Check
                 lines = market_lines.get(p['PLAYER_NAME'], {})
-                l_pts = lines.get('PTS', 999)
-                l_reb = lines.get('REB', 999)
-                l_ast = lines.get('AST', 999)
+                l_pts = lines.get('PTS', 999); l_reb = lines.get('REB', 999); l_ast = lines.get('AST', 999)
+                val_add = 0; bet_str = ""
                 
-                val_add = 0
-                bet_str = ""
+                if proj_pts > (l_pts + 2.0): val_add += (proj_pts - l_pts); bet_str += f"PTS > {l_pts} "
+                if proj_reb > (l_reb + 1.5): val_add += (proj_reb - l_reb); bet_str += f"REB > {l_reb} "
+                if proj_ast > (l_ast + 1.5): val_add += (proj_ast - l_ast); bet_str += f"AST > {l_ast} "
                 
-                if proj_pts > (l_pts + 2.0):
-                    val_add += (proj_pts - l_pts)
-                    bet_str += f"PTS > {l_pts} "
-                if proj_reb > (l_reb + 1.5):
-                    val_add += (proj_reb - l_reb)
-                    bet_str += f"REB > {l_reb} "
-                if proj_ast > (l_ast + 1.5):
-                    val_add += (proj_ast - l_ast)
-                    bet_str += f"AST > {l_ast} "
-                    
                 if val_add >= min_edge:
                     memo = generate_memo(val_add, signal)
-                    # ADD DATE TO DICTIONARY FOR LEDGER
                     audit_results.append({
                         "Date": today_str,
                         "Player": p['PLAYER_NAME'],
@@ -372,51 +307,23 @@ else:
                         "AST": f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
                     })
 
-# --- DISPLAY RESULTS ---
 st.subheader(f"📋 Daily Ledger ({len(audit_results)} Flags Found)")
 
 if audit_results:
     res_df = pd.DataFrame(audit_results).sort_values(by='Edge', ascending=False)
+    if not show_all: res_df = res_df[res_df['Edge'] >= min_edge]
+    st.dataframe(res_df.drop(columns=['Date']), column_config={
+        "Manager Memo": st.column_config.TextColumn("Manager Memo", width="medium"),
+        "Edge": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=10),
+    }, use_container_width=True, hide_index=True)
     
-    # Filter?
-    if not show_all:
-        res_df = res_df[res_df['Edge'] >= min_edge]
-
-    # Display Table (Hiding the Date column to keep it clean)
-    st.dataframe(
-        res_df.drop(columns=['Date']),
-        column_config={
-            "Manager Memo": st.column_config.TextColumn("Manager Memo", width="medium"),
-            "Edge": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=10),
-            "Signal": st.column_config.Column("Risk Profile")
-        },
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    # SAVE TO LEDGER BUTTON
     if st.button("💾 Commit to Ledger (Google Sheets)"):
         if sheet:
             try:
-                # Loop through results and save to Google
                 for item in audit_results:
-                    # Simple check to avoid duplicates (Checks if player name exists in sheet)
-                    existing_data = sheet.findall(item['Player'])
-                    
-                    # Append Row: Date, Player, Team, Bet, Edge, Result (Pending)
-                    sheet.append_row([
-                        item['Date'], 
-                        item['Player'], 
-                        item['Team'], 
-                        item['Bet'], 
-                        item['Edge'], 
-                        "PENDING"
-                    ])
-                st.success("✅ Successfully updated the Master Ledger!")
-                st.balloons()
-            except Exception as e:
-                st.error(f"Error saving to sheet: {e}")
-        else:
-            st.error("Sheet connection not active. Check Secrets.")
-else:
-    st.info("No discrepancies found matching your criteria. Market is sharp today.")
+                    existing = sheet.findall(item['Player'])
+                    sheet.append_row([item['Date'], item['Player'], item['Team'], item['Bet'], item['Edge'], "PENDING"])
+                st.success("✅ Successfully updated the Master Ledger!"); st.balloons()
+            except Exception as e: st.error(f"Error saving to sheet: {e}")
+        else: st.error("Sheet connection not active. Check Secrets.")
+else: st.info("No discrepancies found matching your criteria. Market is sharp today.")
