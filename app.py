@@ -115,7 +115,7 @@ def generate_memo(edge, signal):
 # 1. Header Metrics
 col1, col2, col3 = st.columns(3)
 # Update time to show ET
-now_et = datetime.now(timedelta(hours=-5))
+now_et = datetime.utcnow() - timedelta(hours=5)
 col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
 col2.metric("Market Status", "Live", delta="Open")
 
@@ -232,3 +232,4 @@ if audit_results:
     )
 else:
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
+
