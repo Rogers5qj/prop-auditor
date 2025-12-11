@@ -209,14 +209,14 @@ def get_market_data(api_key):
                 
                 # 2. Extract Lines
             book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
-                if not book and game.get('bookmakers'): book = game['bookmakers'][0]
-                if book:
-                    for m in book.get('markets', []):
-                        m_key = 'PTS' if 'points' in m['key'] else 'REB' if 'rebounds' in m['key'] else 'AST'
-                        for out in m.get('outcomes', []):
-                            if out.get('point'):
-                                if out['description'] not in lines: lines[out['description']] = {}
-                                lines[out['description']][m_key] = out['point']
+            if not book and game.get('bookmakers'): book = game['bookmakers'][0]
+            if book:
+                for m in book.get('markets', []):
+                    m_key = 'PTS' if 'points' in m['key'] else 'REB' if 'rebounds' in m['key'] else 'AST'
+                    for out in m.get('outcomes', []):
+                        if out.get('point'):
+                            if out['description'] not in lines: lines[out['description']] = {}
+                            lines[out['description']][m_key] = out['point']
         return lines, schedule
     except: return {}, []
 
