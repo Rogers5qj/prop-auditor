@@ -318,14 +318,14 @@ if audit_results:
     }, use_container_width=True, hide_index=True)
     
     if st.button("💾 Commit to Ledger (Google Sheets)"):
-    if sheet:
-        try:
-            for item in audit_results:
+        if sheet:
+            try:
+                for item in audit_results:
                     # SAFETY CHECK: Only save if the edge is actually good.
                     # This prevents "Show All" garbage from polluting your sheet.
-                if item['Edge'] >= min_edge: 
-                    existing = sheet.findall(item['Player'])
-                    sheet.append_row([item['Date'], item['Player'], item['Team'], item['Bet'], item['Edge'], "PENDING"])
+                    if item['Edge'] >= min_edge: 
+                        existing = sheet.findall(item['Player'])
+                        sheet.append_row([item['Date'], item['Player'], item['Team'], item['Bet'], item['Edge'], "PENDING"])
                 st.success("✅ Successfully updated the Master Ledger!"); st.balloons()
             except Exception as e: st.error(f"Error saving to sheet: {e}")
         else: st.error("Sheet connection not active. Check Secrets.")
