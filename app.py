@@ -31,7 +31,7 @@ def connect_to_sheet():
         return client.open("Prop_Auditor_Ledger").sheet1
     except: return None
 
-# --- AUTO-GRADING ENGINE (ROBUST V7) ---
+# --- AUTO-GRADING ENGINE (SMART V8) ---
 def grade_pending_bets(sheet):
     """Checks PENDING rows against actual stats and updates the sheet."""
     try:
@@ -40,6 +40,7 @@ def grade_pending_bets(sheet):
         
         updates_made = 0
         stats_cache = {}
+        log_msgs = [] # To show the user what happened
         
         # Loop through every row
         for i, row in enumerate(data):
@@ -57,13 +58,13 @@ def grade_pending_bets(sheet):
                     except: continue
                 
                 if not d_obj:
-                    st.error(f"❌ Date Error: Could not read '{date_str}' for {player}")
+                    log_msgs.append(f"❌ Skipped {player}: Invalid Date '{date_str}'")
                     continue
                 
                 fmt_date = d_obj.strftime('%m/%d/%Y') # Format API expects
                 cache_key = d_obj.strftime('%Y-%m-%d')
                 
-                # 2. Fetch Stats (Cache to save time)
+                # 2. Fetch Stats (Cache)
                 if cache_key not in stats_cache:
                     try:
                         stats = leaguedashplayerstats.LeagueDashPlayerStats(
@@ -73,9 +74,9 @@ def grade_pending_bets(sheet):
                             per_mode_detailed='PerGame'
                         ).get_data_frames()[0]
                         stats_cache[cache_key] = stats
-                        time.sleep(0.2) # Polite API pause
+                        time.sleep(0.2)
                     except:
-                        st.warning(f"⚠️ No API data found for {fmt_date}")
+                        log_msgs.append(f"⚠️ API Error for {fmt_date}")
                         stats_cache[cache_key] = pd.DataFrame()
                 
                 # 3. Find Player
@@ -84,7 +85,7 @@ def grade_pending_bets(sheet):
                 
                 p_stats = daily_df[daily_df['PLAYER_NAME'] == player]
                 if p_stats.empty:
-                    # Player didn't play that day
+                    log_msgs.append(f"⚠️ {player} not found in box score for {fmt_date}")
                     continue
                 
                 # 4. Get Actuals
@@ -92,29 +93,33 @@ def grade_pending_bets(sheet):
                 act_reb = float(p_stats.iloc[0]['REB'])
                 act_ast = float(p_stats.iloc[0]['AST'])
                 
-                # 5. Check Bet (Flexible Regex: allows spaces or no spaces)
-                conditions = re.findall(r'(PTS|REB|AST)\s*>\s*([\d\.]+)', bet_str)
+                # 5. Check Bet (SMART REGEX)
+                # Handles "PTS > 14.5" AND "Over 14.5" (Defaults 'Over' to PTS)
+                conditions = re.findall(r'(PTS|REB|AST|Over|Points)\s*(?:>)?\s*([\d\.]+)', bet_str, re.IGNORECASE)
                 
                 if not conditions:
-                    st.warning(f"⚠️ Could not read bet: '{bet_str}'")
+                    log_msgs.append(f"⚠️ Could not read bet format: '{bet_str}'")
                     continue
 
                 won = True
                 for cat, val in conditions:
                     target = float(val)
-                    if cat == 'PTS' and act_pts <= target: won = False
-                    elif cat == 'REB' and act_reb <= target: won = False
-                    elif cat == 'AST' and act_ast <= target: won = False
+                    cat_clean = cat.upper()
+                    
+                    # LOGIC: If "Over", assume Points. 
+                    if (cat_clean == 'PTS' or cat_clean == 'OVER' or cat_clean == 'POINTS') and act_pts <= target: won = False
+                    elif cat_clean == 'REB' and act_reb <= target: won = False
+                    elif cat_clean == 'AST' and act_ast <= target: won = False
                 
                 # 6. Update Sheet
                 result_text = "WIN" if won else "LOSS"
-                # Row index is i + 2 (1 for 0-index, 1 for header)
                 sheet.update_cell(i + 2, 6, result_text) 
                 updates_made += 1
+                log_msgs.append(f"✅ Graded {player}: {result_text}")
                 
-        return f"Audit Complete: Graded {updates_made} bets."
+        return f"Graded {updates_made} bets.", log_msgs
     except Exception as e:
-        return f"Grading Error: {e}"
+        return f"Grading Error: {e}", []
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -138,10 +143,19 @@ with st.sidebar:
         # AUTO GRADE BUTTON
         if st.button("🔄 Auto-Grade Pending"):
             with st.spinner("Auditing past performance..."):
-                msg = grade_pending_bets(sheet)
-                if "Error" in msg: st.error(msg)
+                status, logs = grade_pending_bets(sheet)
+                
+                # Show results
+                if "Error" in status: 
+                    st.error(status)
+                elif int(re.search(r'\d+', status).group()) == 0:
+                    st.warning(status)
+                    # Show the Debug Logs so user knows WHY it failed
+                    with st.expander("View Debug Logs"):
+                        for log in logs:
+                            st.write(log)
                 else: 
-                    st.success(msg)
+                    st.success(status)
                     time.sleep(2)
                     st.rerun()
 
@@ -226,28 +240,13 @@ now_et = datetime.utcnow() - timedelta(hours=5)
 col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
 col2.metric("Market Status", "Live", delta="Open")
 
-# --- EXPLANATION SECTION (Patrick Rogers Style) ---
 with st.expander("📘 Read the Column: How This System Works"):
     st.markdown("""
     ### Let's Be Honest About the Betting Market
-    
-    Look, the Prop Auditor isn't here to sell you a crystal ball. We all know those don't exist. Instead, we're treating this season like a balance sheet. Here is the scouting report on how we find value when the rest of the market is just guessing.
-
-    #### 1. The Internal Evaluation (Asset Valuation)
-    We don't care about the narrative; we care about the numbers. We use a four-pillar accounting method to find a player's "True Value":
-    * **The 'Next Man Up' Reality (Usage Void):** When a star sits out, their 20 shots don't just vanish into thin air—they get reallocated. We calculate exactly who absorbs that volume.
-    * **Pace & Efficiency:** We adjust for the speed of the game. If you're playing a team that defends like a turnstile, we bump the valuation up.
-    * **The Reality Check (Recent Form):** We weigh recent hot streaks against season averages. Is it a breakout, or just a lucky week? We find the difference.
-
-    #### 2. The Liability Check
-    Once we have our number, we cross-reference it against the live lines posted by DraftKings. The question is simple: **What is Vegas missing?**
-
-    #### 3. The Verdicts (The Signals)
-    We only flag a play if the math shows a significant error. Here is how we grade the opportunities:
-    
-    * **ELITE:** This is your All-Star starter. High usage, fast pace, and a defense that can't stop anyone. High conviction play.
-    * **GAMBLER:** The high-risk, high-reward swing. Usually involves defensive stats like Steals or Blocks that are volatile by nature. Proceed with caution.
-    * **ANCHOR:** The reliable veteran. Consistent role players with a safe floor. Good for keeping the ledger in the green.
+    We treat this season like a balance sheet. Here is the scouting report:
+    * **The 'Next Man Up' Reality (Usage Void):** When a star sits, we calculate exactly who absorbs the volume.
+    * **Pace & Efficiency:** We adjust for the speed of the game and opponent DrTg.
+    * **The Reality Check:** We weigh recent hot streaks against sustainable averages.
     """)
 
 with st.spinner('🔄 syncing with NBA Mainframe & Vegas Ledgers...'):
