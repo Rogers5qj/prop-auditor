@@ -208,7 +208,7 @@ def get_market_data(api_key):
                 })
                 
                 # 2. Extract Lines
-                book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
+            book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
                 if not book and game.get('bookmakers'): book = game['bookmakers'][0]
                 if book:
                     for m in book.get('markets', []):
