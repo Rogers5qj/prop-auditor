@@ -293,8 +293,8 @@ if not games.empty and not df.empty:
                 
                 # New Logic: Keep if it beats minimum OR if user wants to see everything
                 if val_add >= min_edge or show_all:
-                memo = generate_memo(val_add, signal)
-                audit_results.append({ ... })
+                    memo = generate_memo(val_add, signal)
+                    audit_results.append({ ... })
                         "Date": today_str,
                         "Player": p['PLAYER_NAME'],
                         "Team": team_ctx.get(tid,{}).get('Name','UNK'),
