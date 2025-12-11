@@ -192,32 +192,41 @@ def get_nba_data():
     except: return pd.DataFrame(), {}, {}, 100, 112
 
 def get_market_data(api_key):
-    """Fetches BOTH lines AND the schedule from the Odds API."""
-    # FIX: Added 'h2h' to ensure schedule loads even if props are down
-    url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=h2h,player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
+    """Fetches Schedule FIRST, then loops to get Props."""
+    lines = {}
+    schedule = [] 
+    
+    # 1. GET SCHEDULE (Main Market Only)
+    # This works to get the list of active games
+    sched_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=h2h&oddsFormat=american&apiKey={api_key}"
     
     try:
-        resp = requests.get(url).json()
+        sched_resp = requests.get(sched_url).json()
         
-        # --- NEW DEBUGGER ---
-        # If the API returns an error message (dict), show it to the user!
-        if isinstance(resp, dict) and 'message' in resp:
-            st.error(f"⚠️ ODDS API ERROR: {resp['message']}")
+        # Check for API Errors (like Quota Exceeded)
+        if isinstance(sched_resp, dict) and 'message' in sched_resp:
+            st.error(f"⚠️ ODDS API ERROR: {sched_resp['message']}")
             return {}, []
-        # --------------------
-
-        lines = {}
-        schedule = [] 
             
-        if isinstance(resp, list):
-            for game in resp:
-                schedule.append({
-                    'home_team': game['home_team'],
-                    'away_team': game['away_team']
-                })
-                    
-                book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
-                if not book and game.get('bookmakers'): book = game['bookmakers'][0]
+        if not isinstance(sched_resp, list): return {}, []
+
+        # 2. LOOP THROUGH GAMES TO GET PROPS
+        # We limit this to the first 10 games to protect your quota
+        for game in sched_resp[:10]:
+            game_id = game['id']
+            schedule.append({
+                'home_team': game['home_team'],
+                'away_team': game['away_team']
+            })
+            
+            # Fetch Props for this specific game
+            prop_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/events/{game_id}/odds?regions=us&markets=player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
+            try:
+                prop_data = requests.get(prop_url).json()
+                
+                # Parse Bookmakers
+                book = next((b for b in prop_data.get('bookmakers', []) if b['key'] == 'draftkings'), None)
+                if not book and prop_data.get('bookmakers'): book = prop_data['bookmakers'][0]
                 
                 if book:
                     for m in book.get('markets', []):
@@ -226,10 +235,17 @@ def get_market_data(api_key):
                             if out.get('point'):
                                 if out['description'] not in lines: lines[out['description']] = {}
                                 lines[out['description']][m_key] = out['point']
+                
+                time.sleep(0.2) # Pause to be nice to the API
+            except:
+                continue
+
         return lines, schedule
+
     except Exception as e: 
-        st.error(f"⚠️ CRITICAL CONNECTION ERROR: {e}")
+        st.error(f"⚠️ CONNECTION ERROR: {e}")
         return {}, []
+
 
 
 
