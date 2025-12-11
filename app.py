@@ -259,7 +259,18 @@ audit_results = []
 today_str = (datetime.utcnow() - timedelta(hours=5)).strftime('%Y-%m-%d')
 try: games = scoreboardv2.ScoreboardV2(game_date=today_str).game_header.get_data_frame()
 except: games = pd.DataFrame()
-
+    # --- DEBUG DIAGNOSTICS (PASTE THIS HERE) ---
+with st.expander("🛠️ System Diagnostics (Why is it empty?)"):
+    st.write(f"**Target Date:** {today_str}")
+    st.write(f"**Games Found:** {len(games)}")
+    st.write(f"**Players Loaded:** {len(df)}")
+    
+    if games.empty:
+        st.error("❌ NBA API returned 0 games. The Schedule might be empty or the API is down.")
+    else:
+        st.success(f"✅ NBA API is working. Found {len(games)} games.")
+        st.dataframe(games) # Show us the raw game data
+# -------------------------------------------
 if not games.empty and not df.empty:
     for game in games.to_dict('records'):
         h_id, v_id = game['HOME_TEAM_ID'], game['VISITOR_TEAM_ID']
