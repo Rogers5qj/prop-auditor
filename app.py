@@ -120,23 +120,27 @@ col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
 col2.metric("Market Status", "Live", delta="Open")
 
 # --- EXPLANATION SECTION ---
-with st.expander("📘 How to Read the Audit (Methodology)"):
+with st.expander("📘 Read the Column: How This System Works"):
     st.markdown("""
-    **The Prop Auditor** does not "predict" games. It treats sports betting like a financial audit.
+    ### Let's Be Honest About the Betting Market
     
-    1.  **The Asset Valuation (Internal Projection):** We calculate a player's "True Value" using a 4-pillar accounting method:
-        * **The Usage Void:** When players are out, their stats don't disappear—they are reallocated. We calculate exactly who absorbs that volume.
-        * **Pace & Efficiency:** We adjust for the speed of the game and the opponent's defensive rating (DrTg).
-        * **Recent Form:** We weigh recent performance against season averages to detect "Hot Hand" anomalies vs. sustainable trends.
+    Look, the Prop Auditor isn't here to sell you a crystal ball. We all know those don't exist. Instead, we're treating this season like a balance sheet. Here is the scouting report on how we find value when the rest of the market is just guessing.
+
+    #### 1. The Internal Evaluation (Asset Valuation)
+    We don't care about the narrative; we care about the numbers. We use a four-pillar accounting method to find a player's "True Value":
+    * **The 'Next Man Up' Reality (Usage Void):** When a star sits out, their 20 shots don't just vanish into thin air—they get reallocated. We calculate exactly who absorbs that volume.
+    * **Pace & Efficiency:** We adjust for the speed of the game. If you're playing a team that defends like a turnstile, we bump the valuation up.
+    * **The Reality Check (Recent Form):** We weigh recent hot streaks against season averages. Is it a breakout, or just a lucky week? We find the difference.
+
+    #### 2. The Liability Check
+    Once we have our number, we cross-reference it against the live lines posted by DraftKings. The question is simple: **What is Vegas missing?**
+
+    #### 3. The Verdicts (The Signals)
+    We only flag a play if the math shows a significant error. Here is how we grade the opportunities:
     
-    2.  **The Liability Check (Market Line):**
-        We cross-reference our valuation against the live lines posted by DraftKings. 
-    
-    3.  **The Audit (The Signal):**
-        We only flag a play if the discrepancy is mathematically significant (an "Accounting Error").
-        * **ELITE:** High usage player in a fast-paced, low-defense matchup. (High Conviction).
-        * **GAMBLER:** High variance plays (usually defensive stats like Steals/Blocks). High risk, high reward.
-        * **ANCHOR:** Consistent role players with a safe floor. Good for "Cash" plays.
+    * **ELITE:** This is your All-Star starter. High usage, fast pace, and a defense that can't stop anyone. High conviction play.
+    * **GAMBLER:** The high-risk, high-reward swing. Usually involves defensive stats like Steals or Blocks that are volatile by nature. Proceed with caution.
+    * **ANCHOR:** The reliable veteran. Consistent role players with a safe floor. Good for keeping the ledger in the green.
     """)
     
 # 2. Loading State
@@ -252,5 +256,6 @@ if audit_results:
     )
 else:
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
+
 
 
