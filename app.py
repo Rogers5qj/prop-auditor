@@ -63,17 +63,28 @@ with st.sidebar:
     # ### NEW: SIDEBAR HISTORY (READ THE LEDGER) ###
     st.markdown("### 🏛️ The Vault")
     sheet = connect_to_sheet() # Connect to Google
-    if sheet:
+if sheet:
         try:
             records = sheet.get_all_records()
             if records:
                 df_hist = pd.DataFrame(records)
-                # Count Wins (You must manually update the 'Result' column in Sheets to 'WIN' to see this go up!)
-                wins = len(df_hist[df_hist['Result'] == 'WIN'])
-                total = len(df_hist)
+                
+                # --- LOGIC FIX: Ignore 'PENDING' bets ---
+                # We create a new filtered list called 'graded' that only has finished bets
+                graded = df_hist[df_hist['Result'].isin(['WIN', 'LOSS'])]
+                
+                wins = len(graded[graded['Result'] == 'WIN'])
+                total = len(graded)
+                losses = total - wins
+                
                 if total > 0:
                     win_pct = (wins / total) * 100
-                    st.metric("All-Time Record", f"{wins}-{total-wins}", f"{win_pct:.1f}% Win Rate")
+                    st.metric("All-Time Record", f"{wins}-{losses}", f"{win_pct:.1f}% Win Rate")
+                else:
+                    # This shows when you have bets in the sheet, but they are all PENDING
+                    st.metric("All-Time Record", "0-0", "Pending Results")
+        except:
+            st.caption("Connecting to Ledger...")
                 else:
                     st.caption("Ledger is active but empty.")
         except:
@@ -327,3 +338,4 @@ if audit_results:
     # ----------------------------------
 else:
     st.info("No discrepancies found matching your criteria. Market is sharp today.")
+
