@@ -176,8 +176,20 @@ with st.sidebar:
                 st.caption("Ledger is active but empty.")
         except:
             st.caption("Connecting to Ledger...")
-    else:
+        else:
         st.caption("⚠️ Ledger Disconnected")
+    
+    st.divider()
+    
+    # --- NEW: DATE PICKER ---
+    st.markdown("### 📅 Select Date")
+    # Default to today
+    default_date = datetime.utcnow() - timedelta(hours=5)
+    selected_date = st.date_input("Audit Date", default_date)
+    # ------------------------
+
+    st.markdown("### ⚙️ Audit Settings")
+
     
     st.divider()
     st.markdown("### ⚙️ Audit Settings")
