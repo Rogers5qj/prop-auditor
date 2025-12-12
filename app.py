@@ -161,107 +161,125 @@ with st.sidebar:
 # --- FUNCTIONS (ENGINE) ---
 @st.cache_data(ttl=3600)
 def get_nba_data():
-    """Fetches NBA player stats and creates a Name->ID map."""
+    """Fetches Stats + Calculates Volatility (Consistency) & Shot Quality."""
     try:
-        # Team Stats
+        # 1. Team Stats (Added OPP_EFG_PCT)
         team_stats = leaguedashteamstats.LeagueDashTeamStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
-        if 'PACE' not in team_stats.columns: team_stats.rename(columns={'Pace': 'PACE'}, inplace=True)
-        if 'DEF_RATING' not in team_stats.columns: team_stats.rename(columns={'DefRtg': 'DEF_RATING'}, inplace=True)
         
-        # Create Maps
-        team_ctx = {row['TEAM_ID']: {'Name': row['TEAM_NAME'], 'Pace': row['PACE'], 'DefRtg': row['DEF_RATING']} for _, row in team_stats.iterrows()}
-        # Name to ID Map (Crucial for linking Odds API to NBA API)
+        # Rename columns for clarity (Keep your original logic)
+        cols_map = {'Pace': 'PACE', 'DefRtg': 'DEF_RATING', 'OPP_EFG_PCT': 'OPP_EFG'}
+        team_stats.rename(columns={k:v for k,v in cols_map.items() if k in team_stats.columns}, inplace=True)
+        
+        # Create Context Maps
+        team_ctx = {
+            row['TEAM_ID']: {
+                'Name': row['TEAM_NAME'], 
+                'Pace': row['PACE'], 
+                'DefRtg': row['DEF_RATING'],
+                'OppEfg': row['OPP_EFG'] # <--- NEW: Shot Quality Metric
+            } for _, row in team_stats.iterrows()
+        }
+        
         name_to_id_map = {row['TEAM_NAME']: row['TEAM_ID'] for _, row in team_stats.iterrows()}
-        # Manual Fixes for common name mismatches
         name_to_id_map['LA Clippers'] = 1610612746
         name_to_id_map['Los Angeles Clippers'] = 1610612746
         
-        lg_pace = team_stats['PACE'].mean(); lg_def = team_stats['DEF_RATING'].mean()
+        lg_pace = team_stats['PACE'].mean()
+        lg_def = team_stats['DEF_RATING'].mean()
+        lg_efg = team_stats['OPP_EFG'].mean() # <--- NEW: League Average eFG
 
-        # Player Stats
+        # 2. Player Stats (Base)
         base = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Base', per_mode_detailed='PerGame').get_data_frames()[0]
         adv = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
         df = pd.merge(base[['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'MIN', 'GP', 'PTS', 'REB', 'AST', 'STL', 'BLK']], adv[['PLAYER_ID', 'DEF_RATING', 'USG_PCT']], on='PLAYER_ID')
         
-        # L5 Stats
+        # 3. L5 Stats (Your Original Logic)
         l5 = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', last_n_games=5, per_mode_detailed='PerGame').get_data_frames()[0]
         l5 = l5[['PLAYER_ID', 'PTS', 'REB', 'AST']].rename(columns={'PTS': 'L5_PTS', 'REB': 'L5_REB', 'AST': 'L5_AST'})
         df = pd.merge(df, l5, on='PLAYER_ID', how='left')
+
+        # 4. NEW: CONSISTENCY ENGINE (Standard Deviation)
+        # We fetch every game log to see who is consistent vs volatile
+        from nba_api.stats.endpoints import leaguegamelog
+        logs = leaguegamelog.LeagueGameLog(season='2025-26', player_or_team_abbreviation='P').get_data_frames()[0]
         
-        return df, team_ctx, name_to_id_map, lg_pace, lg_def
-    except: return pd.DataFrame(), {}, {}, 100, 112
+        # Calculate StdDev for Points (Volatility)
+        volatility_map = logs.groupby('PLAYER_ID')['PTS'].std().to_dict()
+        
+        # Add Volatility to DataFrame (Fill NaN with 5.0 for rookies)
+        df['PTS_VOLATILITY'] = df['PLAYER_ID'].map(volatility_map).fillna(5.0) 
+
+        return df, team_ctx, name_to_id_map, lg_pace, lg_def, lg_efg
+    except Exception as e: 
+        st.error(f"NBA Data Error: {e}")
+        return pd.DataFrame(), {}, {}, 100, 112, 0.55
 
 
-@st.cache_data(ttl=1800, show_spinner=False) # <--- ADD THIS LINE (30 Min Buffer)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_market_data(api_key, target_date):
-    """Fetches Schedule FIRST, filters by DATE, then loops to get Props."""
+    """Fetches Schedule + Spreads + Props."""
     lines = {}
     schedule = [] 
+    game_spreads = {} # <--- NEW: Store spreads here
     
-    # 1. GET SCHEDULE (Main Market)
-    sched_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=h2h&oddsFormat=american&apiKey={api_key}"
+    # 1. GET SCHEDULE & SPREADS
+    # Added 'spreads' to the markets list
+    sched_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/odds?regions=us&markets=h2h,spreads&oddsFormat=american&apiKey={api_key}"
     
     try:
         sched_resp = requests.get(sched_url).json()
-        
         if isinstance(sched_resp, dict) and 'message' in sched_resp:
-            st.error(f"⚠️ ODDS API ERROR: {sched_resp['message']}")
-            return {}, []
+            return {}, {}, {} 
             
-        if not isinstance(sched_resp, list): return {}, []
+        if not isinstance(sched_resp, list): return {}, {}, {}
 
-        # 2. FILTER & LOOP
         for game in sched_resp:
-            # --- THE BOUNCER (Date Filter) ---
-            # Parse ISO8601 time (e.g. 2025-12-12T00:30:00Z)
-            # We strip the 'Z' and treat as UTC, then subtract 5h for ET
+            # --- DATE FILTER ---
             try:
                 start_str = game['commence_time'].replace('Z', '')
                 start_dt = datetime.fromisoformat(start_str) - timedelta(hours=5)
-                game_date_str = start_dt.strftime('%Y-%m-%d')
-                
-                # If game date doesn't match target, skip it!
-                if game_date_str != target_date:
-                    continue
-            except:
-                continue # If date parsing fails, skip just to be safe
-            # ---------------------------------
-
-            game_id = game['id']
-            schedule.append({
-                'home_team': game['home_team'],
-                'away_team': game['away_team']
-            })
+                if start_dt.strftime('%Y-%m-%d') != target_date: continue
+            except: continue 
             
-            # Fetch Props for this SPECIFIC game
+            game_id = game['id']
+            
+            # --- NEW: EXTRACT SPREAD ---
+            # We look for the spread to define "Blowout Risk"
+            spread_val = 0.0
+            book = next((b for b in game.get('bookmakers', []) if b['key'] == 'draftkings'), None)
+            if book:
+                for m in book.get('markets', []):
+                    if m['key'] == 'spreads':
+                        # Grab the first outcome (usually Home team spread)
+                        # We just care about the MAGNITUDE (absolute value)
+                        if len(m['outcomes']) > 0:
+                            spread_val = abs(m['outcomes'][0].get('point', 0))
+            
+            # Save data
+            schedule.append({'home_team': game['home_team'], 'away_team': game['away_team'], 'id': game_id})
+            game_spreads[game['home_team']] = spread_val
+            game_spreads[game['away_team']] = spread_val
+            
+            # 2. GET PROPS (Loop)
             prop_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/events/{game_id}/odds?regions=us&markets=player_points,player_rebounds,player_assists&oddsFormat=american&apiKey={api_key}"
             try:
                 prop_data = requests.get(prop_url).json()
+                p_book = next((b for b in prop_data.get('bookmakers', []) if b['key'] == 'draftkings'), None)
+                if not p_book and prop_data.get('bookmakers'): p_book = prop_data['bookmakers'][0]
                 
-                # Parse Bookmakers
-                book = next((b for b in prop_data.get('bookmakers', []) if b['key'] == 'draftkings'), None)
-                if not book and prop_data.get('bookmakers'): book = prop_data['bookmakers'][0]
-                
-                if book:
-                    for m in book.get('markets', []):
+                if p_book:
+                    for m in p_book.get('markets', []):
                         m_key = 'PTS' if 'points' in m['key'] else 'REB' if 'rebounds' in m['key'] else 'AST'
                         for out in m.get('outcomes', []):
                             if out.get('point'):
                                 if out['description'] not in lines: lines[out['description']] = {}
                                 lines[out['description']][m_key] = out['point']
-                
-                time.sleep(0.2) # Pause to be nice to the API
-            except:
-                continue
+                time.sleep(0.1) 
+            except: continue
 
-        return lines, schedule
+        return lines, schedule, game_spreads # <--- Return spreads
 
-    except Exception as e: 
-        st.error(f"⚠️ CONNECTION ERROR: {e}")
-        return {}, []
-
-
-
+    except: return {}, {}, {}
 
 
 def generate_memo(edge, signal):
@@ -280,67 +298,87 @@ col2.metric("Market Status", "Live", delta="Open")
 
 # Use Odds API for EVERYTHING (Bypasses NBA Schedule Block)
 with st.spinner('🔄 syncing with Market Data...'):
-    df, team_ctx, name_to_id, lg_pace, lg_def = get_nba_data()
-    # We pass 'today_str' so the function knows which games to keep
-    market_lines, market_schedule = get_market_data(api_key, today_str)
+    # Unpack the new return values (lg_efg and market_spreads)
+    df, team_ctx, name_to_id, lg_pace, lg_def, lg_efg = get_nba_data()
+    market_lines, market_schedule, market_spreads = get_market_data(api_key, today_str)
 
 
 col3.metric("Active Lines", len(market_lines))
 
 audit_results = []
 
-# --- NEW ENGINE: LOOP THROUGH ODDS API SCHEDULE ---
 if market_schedule and not df.empty:
     for game in market_schedule:
-        # Convert Names to IDs
-        h_name = game['home_team']
-        v_name = game['away_team']
+        h_name, v_name = game['home_team'], game['away_team']
+        h_id, v_id = name_to_id.get(h_name, 0), name_to_id.get(v_name, 0)
         
-        # Safe Lookup
-        h_id = name_to_id.get(h_name, 0)
-        v_id = name_to_id.get(v_name, 0)
+        if h_id == 0 or v_id == 0: continue 
+
+        # --- 1. GET SPREAD FOR BLOWOUT CHECK ---
+        spread = market_spreads.get(h_name, 0)
+        blowout_risk = spread > 12.5 # Threshold for blowout
         
-        if h_id == 0 or v_id == 0:
-            continue # Skip if name mismatch
-            
         for tid in [h_id, v_id]:
             oid = v_id if tid == h_id else h_id
             is_home = (tid == h_id)
             
-            # (Rest of logic is identical)
+            # --- 2. ADVANCED FACTORS ---
+            # Pace (Same as before)
             pace_factor = ((team_ctx.get(tid,{}).get('Pace',100) + team_ctx.get(oid,{}).get('Pace',100))/2) / lg_pace
-            def_factor = team_ctx.get(oid,{}).get('DefRtg',112) / lg_def
+            
+            # Defense (NOW INCLUDES eFG% - Shot Quality)
+            opp_def = team_ctx.get(oid,{}).get('DefRtg', 112)
+            opp_efg = team_ctx.get(oid,{}).get('OppEfg', 0.55)
+            
+            # We average the Rating Factor and the Shot Quality Factor
+            def_rating_factor = opp_def / lg_def
+            shot_quality_factor = opp_efg / lg_efg
+            combined_def_factor = (def_rating_factor + shot_quality_factor) / 2
+            
             roster = df[df['TEAM_ID'] == tid].sort_values('MIN', ascending=False).head(9)
             
             for _, p in roster.iterrows():
                 if p['MIN'] < 12: continue
-                home_factor = 1.03 if (is_home and p['USG_PCT'] < 0.20) else 1.0
-                signal = "-"
-                dos = (p['STL']*2.5) + (p['BLK']*2.0)
-                if dos > 3.0: signal = "GAMBLER"
-                fantasy = p['PTS'] + 1.2*p['REB'] + 1.5*p['AST'] + 3*p['STL'] + 3*p['BLK']
-                if fantasy > 45: signal = "ELITE"
                 
-                total_mult = pace_factor * def_factor * home_factor
-                proj_pts = p['PTS'] * total_mult
+                # --- 3. APPLY CONSISTENCY PENALTY ---
+                # We punish players who are erratic.
+                # Formula: Base - (0.5 * Volatility)
+                # If a player averages 20 but StdDev is 10, their "Safe Base" is 15.
+                safe_pts_base = p['PTS'] - (0.5 * p['PTS_VOLATILITY'])
+                
+                # --- 4. APPLY BLOWOUT TAX ---
+                # If spread > 12.5, assume 10% less production due to sitting 4th qtr
+                blowout_tax = 0.90 if blowout_risk else 1.0
+                
+                home_factor = 1.03 if (is_home and p['USG_PCT'] < 0.20) else 1.0
+                
+                # FINAL CRYSTAL BALL PROJECTION
+                total_mult = pace_factor * combined_def_factor * home_factor * blowout_tax
+                
+                proj_pts = safe_pts_base * total_mult # Uses Safe Base!
                 proj_reb = p['REB'] * total_mult
                 proj_ast = p['AST'] * total_mult
+                
                 lines = market_lines.get(p['PLAYER_NAME'], {})
                 l_pts = lines.get('PTS', 999); l_reb = lines.get('REB', 999); l_ast = lines.get('AST', 999)
                 val_add = 0; bet_str = ""
                 
+                # Calc Edges
                 if proj_pts > (l_pts + 2.0): val_add += (proj_pts - l_pts); bet_str += f"PTS > {l_pts} "
                 if proj_reb > (l_reb + 1.5): val_add += (proj_reb - l_reb); bet_str += f"REB > {l_reb} "
                 if proj_ast > (l_ast + 1.5): val_add += (proj_ast - l_ast); bet_str += f"AST > {l_ast} "
                 
-                # Allow 0 Edge if Show All is checked
+                # Signal Generation
+                signal = "-"
+                if blowout_risk: signal = "⚠️ BLOWOUT" # New Signal
+                elif p['PTS_VOLATILITY'] > 8.0: signal = "⚠️ VOLATILE" # New Signal
+                elif p['PTS'] + 1.2*p['REB'] + 1.5*p['AST'] > 45: signal = "ELITE"
+
                 if val_add >= min_edge or show_all:
                     memo = generate_memo(val_add, signal)
-                    
-                    # Clean up the 999 for display
-                    d_pts = f"{round(proj_pts,1)} ({l_pts})" if l_pts!=999 else "-"
-                    d_reb = f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "-"
-                    d_ast = f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
+                    d_pts = f"{round(proj_pts,1)} ({l_pts})" if l_pts!=999 else "Waiting"
+                    d_reb = f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "Waiting"
+                    d_ast = f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "Waiting"
                     
                     audit_results.append({
                         "Date": today_str,
@@ -350,10 +388,9 @@ if market_schedule and not df.empty:
                         "Manager Memo": memo,
                         "Bet": bet_str,
                         "Edge": round(val_add, 1),
-                        "PTS": d_pts,
-                        "REB": d_reb,
-                        "AST": d_ast
+                        "PTS": d_pts, "REB": d_reb, "AST": d_ast
                     })
+
 
 st.subheader(f"📋 Daily Ledger ({len(audit_results)} Flags Found)")
 
