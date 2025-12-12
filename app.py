@@ -164,10 +164,24 @@ with st.sidebar:
 def get_nba_data():
     """Fetches Stats + Calculates Volatility (Consistency) & Shot Quality."""
     try:
-        # 1. Team Stats (Added OPP_EFG_PCT)
-        team_stats = leaguedashteamstats.LeagueDashTeamStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
+        # 1. Team Stats (Advanced) - Gets PACE and DEF_RATING
+        adv_stats = leaguedashteamstats.LeagueDashTeamStats(
+            season='2025-26', 
+            measure_type_detailed_defense='Advanced', 
+            per_mode_detailed='PerGame'
+        ).get_data_frames()[0]
+
+        # 2. Team Stats (Four Factors) - Gets OPP_EFG_PCT (The missing piece!)
+        four_factors = leaguedashteamstats.LeagueDashTeamStats(
+            season='2025-26', 
+            measure_type_detailed_defense='Four Factors', 
+            per_mode_detailed='PerGame'
+        ).get_data_frames()[0]
+
+        # Merge them together on TEAM_ID
+        team_stats = pd.merge(adv_stats, four_factors[['TEAM_ID', 'OPP_EFG_PCT']], on='TEAM_ID')
         
-        # Rename columns for clarity 
+        # Rename columns for clarity
         cols_map = {'Pace': 'PACE', 'DefRtg': 'DEF_RATING', 'OPP_EFG_PCT': 'OPP_EFG'}
         team_stats.rename(columns={k:v for k,v in cols_map.items() if k in team_stats.columns}, inplace=True)
         
@@ -177,7 +191,7 @@ def get_nba_data():
                 'Name': row['TEAM_NAME'], 
                 'Pace': row['PACE'], 
                 'DefRtg': row['DEF_RATING'],
-                'OppEfg': row['OPP_EFG'] # <--- NEW: Shot Quality Metric
+                'OppEfg': row['OPP_EFG'] # Now this exists!
             } for _, row in team_stats.iterrows()
         }
         
@@ -187,36 +201,29 @@ def get_nba_data():
         
         lg_pace = team_stats['PACE'].mean()
         lg_def = team_stats['DEF_RATING'].mean()
-        lg_efg = team_stats['OPP_EFG'].mean() # <--- NEW: League Average eFG
+        lg_efg = team_stats['OPP_EFG'].mean()
 
-        # 2. Player Stats (Base)
+        # 3. Player Stats (Base)
         base = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Base', per_mode_detailed='PerGame').get_data_frames()[0]
         adv = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
         df = pd.merge(base[['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'MIN', 'GP', 'PTS', 'REB', 'AST', 'STL', 'BLK']], adv[['PLAYER_ID', 'DEF_RATING', 'USG_PCT']], on='PLAYER_ID')
         
-        # 3. L5 Stats 
+        # 4. L5 Stats
         l5 = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', last_n_games=5, per_mode_detailed='PerGame').get_data_frames()[0]
         l5 = l5[['PLAYER_ID', 'PTS', 'REB', 'AST']].rename(columns={'PTS': 'L5_PTS', 'REB': 'L5_REB', 'AST': 'L5_AST'})
         df = pd.merge(df, l5, on='PLAYER_ID', how='left')
 
-        # 4. NEW: CONSISTENCY ENGINE (Standard Deviation)
-        # We fetch every game log to see who is consistent vs volatile
+        # 5. CONSISTENCY ENGINE (Standard Deviation)
         from nba_api.stats.endpoints import leaguegamelog
         logs = leaguegamelog.LeagueGameLog(season='2025-26', player_or_team_abbreviation='P').get_data_frames()[0]
         
-        # Calculate StdDev for Points (Volatility)
         volatility_map = logs.groupby('PLAYER_ID')['PTS'].std().to_dict()
-        
-        # Add Volatility to DataFrame (Fill NaN with 5.0 for rookies)
         df['PTS_VOLATILITY'] = df['PLAYER_ID'].map(volatility_map).fillna(5.0) 
 
-        # RETURN 6 VALUES (Fixes your error)
         return df, team_ctx, name_to_id_map, lg_pace, lg_def, lg_efg
     except Exception as e: 
         st.error(f"NBA Data Error: {e}")
-        # RETURN 6 VALUES HERE TOO (Fixes the crash if API fails)
         return pd.DataFrame(), {}, {}, 100, 112, 0.55
-
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_market_data(api_key, target_date):
