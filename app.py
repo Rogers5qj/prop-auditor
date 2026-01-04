@@ -6,7 +6,7 @@ import random
 import re 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta 
 from nba_api.stats.endpoints import leaguedashteamstats, leaguedashplayerstats
 
 # --- PAGE CONFIGURATION ---
@@ -345,30 +345,56 @@ if market_schedule and not df.empty:
             for _, p in roster.iterrows():
                 if p['MIN'] < 12: continue
                 
-                # --- 3. APPLY CONSISTENCY PENALTY ---
-                # Formula: Base - (0.5 * Volatility)
+               # --- 3. APPLY CONSISTENCY & STRESS TEST ---
+                # "Safe Base" tests the floor (for Overs)
                 safe_pts_base = p['PTS'] - (0.5 * p['PTS_VOLATILITY'])
+                
+                # "High Base" tests the ceiling (for Unders)
+                high_pts_base = p['PTS'] + (0.5 * p['PTS_VOLATILITY'])
                 
                 # --- 4. APPLY BLOWOUT TAX ---
                 blowout_tax = 0.90 if blowout_risk else 1.0
-                
                 home_factor = 1.03 if (is_home and p['USG_PCT'] < 0.20) else 1.0
                 
-                # FINAL CRYSTAL BALL PROJECTION
+                # FINAL CRYSTAL BALL PROJECTION (Ranges)
                 total_mult = pace_factor * combined_def_factor * home_factor * blowout_tax
                 
-                proj_pts = safe_pts_base * total_mult # Uses Safe Base!
-                proj_reb = p['REB'] * total_mult
-                proj_ast = p['AST'] * total_mult
+                # Low projection (Conservative) - Use for OVERS
+                proj_pts_low = safe_pts_base * total_mult 
+                proj_reb_low = p['REB'] * total_mult
+                proj_ast_low = p['AST'] * total_mult
+
+                # High projection (Aggressive) - Use for UNDERS
+                proj_pts_high = high_pts_base * total_mult
+                proj_reb_high = (p['REB'] + (0.5 * 2.0)) * total_mult 
+                proj_ast_high = (p['AST'] + (0.5 * 1.5)) * total_mult 
                 
                 lines = market_lines.get(p['PLAYER_NAME'], {})
                 l_pts = lines.get('PTS', 999); l_reb = lines.get('REB', 999); l_ast = lines.get('AST', 999)
                 val_add = 0; bet_str = ""
                 
-                # Calc Edges
-                if proj_pts > (l_pts + 2.0): val_add += (proj_pts - l_pts); bet_str += f"PTS > {l_pts} "
-                if proj_reb > (l_reb + 1.5): val_add += (proj_reb - l_reb); bet_str += f"REB > {l_reb} "
-                if proj_ast > (l_ast + 1.5): val_add += (proj_ast - l_ast); bet_str += f"AST > {l_ast} "
+                # Calc Edges (Bidirectional Audit)
+                # CHECK OVERS (Compare vs Low Projection)
+                if l_pts != 999 and proj_pts_low > (l_pts + 2.0): 
+                    val_add += (proj_pts_low - l_pts)
+                    bet_str += f"PTS > {l_pts} "
+                if l_reb != 999 and proj_reb_low > (l_reb + 1.5): 
+                    val_add += (proj_reb_low - l_reb)
+                    bet_str += f"REB > {l_reb} "
+                if l_ast != 999 and proj_ast_low > (l_ast + 1.5): 
+                    val_add += (proj_ast_low - l_ast)
+                    bet_str += f"AST > {l_ast} "
+
+                # CHECK UNDERS (Compare vs High Projection)
+                if l_pts != 999 and proj_pts_high < (l_pts - 2.0):
+                    val_add += (l_pts - proj_pts_high)
+                    bet_str += f"PTS < {l_pts} "
+                if l_reb != 999 and proj_reb_high < (l_reb - 1.5):
+                    val_add += (l_reb - proj_reb_high)
+                    bet_str += f"REB < {l_reb} "
+                if l_ast != 999 and proj_ast_high < (l_ast - 1.5):
+                    val_add += (l_ast - proj_ast_high)
+                    bet_str += f"AST < {l_ast} "
                 
                 # Signal Generation
                 signal = "-"
@@ -379,9 +405,14 @@ if market_schedule and not df.empty:
                 if val_add >= min_edge or show_all:
                     memo = generate_memo(val_add, signal)
                     
-                    d_pts = f"{round(proj_pts,1)} ({l_pts})" if l_pts!=999 else "-"
-                    d_reb = f"{round(proj_reb,1)} ({l_reb})" if l_reb!=999 else "-"
-                    d_ast = f"{round(proj_ast,1)} ({l_ast})" if l_ast!=999 else "-"
+                    # Display logic (Show the projection that triggered the bet)
+                    display_pts = proj_pts_high if "PTS <" in bet_str else proj_pts_low
+                    display_reb = proj_reb_high if "REB <" in bet_str else proj_reb_low
+                    display_ast = proj_ast_high if "AST <" in bet_str else proj_ast_low
+                    
+                    d_pts = f"{round(display_pts,1)} ({l_pts})" if l_pts!=999 else "-"
+                    d_reb = f"{round(display_reb,1)} ({l_reb})" if l_reb!=999 else "-"
+                    d_ast = f"{round(display_ast,1)} ({l_ast})" if l_ast!=999 else "-"
                     
                     audit_results.append({
                         "Date": today_str,
