@@ -225,7 +225,7 @@ def get_nba_data():
         st.error(f"NBA Data Error: {e}")
         return pd.DataFrame(), {}, {}, 100, 112, 0.55
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=0, show_spinner=False)
 def get_market_data(api_key, target_date):
     """Fetches Schedule + Spreads + Props."""
     lines = {}
