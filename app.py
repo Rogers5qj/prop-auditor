@@ -31,7 +31,7 @@ def connect_to_sheet():
         return client.open("Prop_Auditor_Ledger").sheet1
     except: return None
 
-# --- AUTO-GRADING ENGINE ---
+# --- AUTO-GRADING ENGINE (UPDATED FOR UNDERS) ---
 def grade_pending_bets(sheet):
     """Checks PENDING rows against actual stats."""
     try:
@@ -87,17 +87,28 @@ def grade_pending_bets(sheet):
                 act_reb = float(p_stats.iloc[0]['REB'])
                 act_ast = float(p_stats.iloc[0]['AST'])
                 
-                # Check Win
-                conditions = re.findall(r'(PTS|REB|AST|Over|Points)\s*(?:>)?\s*([\d\.]+)', bet_str, re.IGNORECASE)
-                if not conditions: continue
+                # --- NEW GRADING LOGIC (Handles < and >) ---
+                # Regex now captures the operator (> or <)
+                conditions = re.findall(r'(PTS|REB|AST)\s*(>|<)\s*([\d\.]+)', bet_str, re.IGNORECASE)
+                
+                # Fallback for old bets without operator (Assume Over)
+                if not conditions:
+                    old_conds = re.findall(r'(PTS|REB|AST|Points)\s*(?:>)?\s*([\d\.]+)', bet_str, re.IGNORECASE)
+                    conditions = [(c[0], '>', c[1]) for c in old_conds]
 
                 won = True
-                for cat, val in conditions:
+                for cat, op, val in conditions:
                     target = float(val)
                     cat_clean = cat.upper()
-                    if (cat_clean == 'PTS' or cat_clean == 'OVER' or cat_clean == 'POINTS') and act_pts <= target: won = False
-                    elif cat_clean == 'REB' and act_reb <= target: won = False
-                    elif cat_clean == 'AST' and act_ast <= target: won = False
+                    
+                    actual = 0.0
+                    if cat_clean in ['PTS', 'POINTS']: actual = act_pts
+                    elif cat_clean == 'REB': actual = act_reb
+                    elif cat_clean == 'AST': actual = act_ast
+                    
+                    # Grade based on Operator
+                    if op == '>' and actual <= target: won = False
+                    elif op == '<' and actual >= target: won = False
                 
                 result_text = "WIN" if won else "LOSS"
                 sheet.update_cell(i + 2, 6, result_text) 
