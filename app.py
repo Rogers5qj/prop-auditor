@@ -171,7 +171,7 @@ with st.sidebar:
 
 # --- FUNCTIONS (ENGINE) ---
 # --- FUNCTIONS (ENGINE) ---
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=0)
 def get_nba_data():
     """Fetches Stats + Calculates Volatility (Consistency) & Shot Quality."""
     try:
