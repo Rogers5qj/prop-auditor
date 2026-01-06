@@ -171,7 +171,7 @@ with st.sidebar:
 
 # --- FUNCTIONS (ENGINE) ---
 # --- FUNCTIONS (ENGINE) ---
-@st.cache_data(ttl=0)
+@st.cache_data(ttl=3600)
 def get_nba_data():
     """Fetches Stats + Calculates Volatility (Consistency) & Shot Quality."""
     try:
@@ -236,7 +236,7 @@ def get_nba_data():
         st.error(f"NBA Data Error: {e}")
         return pd.DataFrame(), {}, {}, 100, 112, 0.55
 
-@st.cache_data(ttl=0, show_spinner=False)
+@st.cache_data(ttl=1600, show_spinner=False)
 def get_market_data(api_key, target_date):
     """Fetches Schedule + Spreads + Props."""
     lines = {}
