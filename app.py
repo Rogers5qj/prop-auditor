@@ -131,6 +131,14 @@ with st.sidebar:
     else:
         api_key = st.text_input("Odds API Key", type="password")
 
+# ... inside st.sidebar, before the Audit Settings ...
+    
+    # 1. Create the Parking Spot
+    injury_spot = st.empty()  
+    
+    st.divider()
+    st.markdown("### ⚙️ Audit Settings")
+    
     st.divider()
 
     # Vault Section
@@ -326,14 +334,18 @@ col3.metric("Active Lines", len(market_lines))
 
 # --- NEW: INJURY MANAGER (SIDEBAR) ---
 # We add this here so it loads AFTER we get the data
-with st.sidebar:
+# --- CHANGE THIS BLOCK AT THE BOTTOM ---
+
+# Instead of "with st.sidebar:", we use the parking spot we made earlier
+with injury_spot.container():
     st.divider()
     st.markdown("### 🚑 Injury Override")
     
     # 1. Select the Team with Injuries
-    # We grab unique team names from the ID map
     team_list = sorted(list(name_to_id.keys()))
     injury_team = st.selectbox("Select Team with Missing Star:", ["None"] + team_list)
+    
+    # ... (Rest of the code stays exactly the same) ...
     
     # 2. Define the Impact
     usage_bump = 1.0
