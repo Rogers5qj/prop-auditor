@@ -322,6 +322,32 @@ with st.spinner('🔄 Running Crystal Ball Algorithms...'):
 
 col3.metric("Active Lines", len(market_lines))
 
+# --- INSERT THIS BLOCK AFTER LINE 252 ---
+
+# --- NEW: INJURY MANAGER (SIDEBAR) ---
+# We add this here so it loads AFTER we get the data
+with st.sidebar:
+    st.divider()
+    st.markdown("### 🚑 Injury Override")
+    
+    # 1. Select the Team with Injuries
+    # We grab unique team names from the ID map
+    team_list = sorted(list(name_to_id.keys()))
+    injury_team = st.selectbox("Select Team with Missing Star:", ["None"] + team_list)
+    
+    # 2. Define the Impact
+    usage_bump = 1.0
+    if injury_team != "None":
+        st.warning(f"⚠️ Adjusting usage for {injury_team}...")
+        bump_pct = st.slider(f"Usage Bump for {injury_team} Teammates:", 0, 30, 15)
+        usage_bump = 1.0 + (bump_pct / 100.0)
+        st.caption(f"Applying {usage_bump}x multiplier to projections.")
+
+    # 3. The 'Questionable' Kill Switch
+    # We pull team names from the market schedule
+    game_teams = sorted(list(set([s['home_team'] for s in market_schedule] + [s['away_team'] for s in market_schedule])))
+    void_games = st.multiselect("⛔ VOID Games (Too much uncertainty):", game_teams)
+
 audit_results = []
 
 if market_schedule and not df.empty:
@@ -353,8 +379,17 @@ if market_schedule and not df.empty:
             
             roster = df[df['TEAM_ID'] == tid].sort_values('MIN', ascending=False).head(9)
             
+# --- REPLACE THE INSIDE OF THE PLAYER LOOP WITH THIS ---
             for _, p in roster.iterrows():
                 if p['MIN'] < 12: continue
+                
+                # A. CHECK FOR VOID (Kill Switch)
+                current_team_name = team_ctx.get(tid,{}).get('Name')
+                if current_team_name in void_games: continue
+
+                # B. APPLY INJURY BOOST (Usage Bump)
+                # If this player is on the team you selected, boost them
+                active_bump = usage_bump if current_team_name == injury_team else 1.0
                 
                # --- 3. APPLY CONSISTENCY & STRESS TEST ---
                 # "Safe Base" tests the floor (for Overs)
@@ -363,12 +398,13 @@ if market_schedule and not df.empty:
                 # "High Base" tests the ceiling (for Unders)
                 high_pts_base = p['PTS'] + (0.5 * p['PTS_VOLATILITY'])
                 
-                # --- 4. APPLY BLOWOUT TAX ---
+                # --- 4. APPLY BLOWOUT TAX & INJURY BUMP ---
                 blowout_tax = 0.90 if blowout_risk else 1.0
                 home_factor = 1.03 if (is_home and p['USG_PCT'] < 0.20) else 1.0
                 
                 # FINAL CRYSTAL BALL PROJECTION (Ranges)
-                total_mult = pace_factor * combined_def_factor * home_factor * blowout_tax
+                # We added 'active_bump' to the end here
+                total_mult = pace_factor * combined_def_factor * home_factor * blowout_tax * active_bump
                 
                 # Low projection (Conservative) - Use for OVERS
                 proj_pts_low = safe_pts_base * total_mult 
@@ -378,11 +414,7 @@ if market_schedule and not df.empty:
                 # High projection (Aggressive) - Use for UNDERS
                 proj_pts_high = high_pts_base * total_mult
                 proj_reb_high = (p['REB'] + (0.5 * 2.0)) * total_mult 
-                proj_ast_high = (p['AST'] + (0.5 * 1.5)) * total_mult 
-                
-                lines = market_lines.get(p['PLAYER_NAME'], {})
-                l_pts = lines.get('PTS', 999); l_reb = lines.get('REB', 999); l_ast = lines.get('AST', 999)
-                val_add = 0; bet_str = ""
+                proj_ast_high = (p['AST'] + (0.5 * 1.5)) * total_mult
                 
                 # Calc Edges (Bidirectional Audit)
                 # CHECK OVERS (Compare vs Low Projection)
