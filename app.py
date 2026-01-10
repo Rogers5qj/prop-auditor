@@ -337,6 +337,9 @@ col3.metric("Active Lines", len(market_lines))
 # --- CHANGE THIS BLOCK AT THE BOTTOM ---
 
 # Instead of "with st.sidebar:", we use the parking spot we made earlier
+# --- CHANGE THIS BLOCK AT THE BOTTOM ---
+
+# Instead of "with st.sidebar:", we use the parking spot we made earlier
 with injury_spot.container():
     st.divider()
     st.markdown("### 🚑 Injury Override")
@@ -345,18 +348,39 @@ with injury_spot.container():
     team_list = sorted(list(name_to_id.keys()))
     injury_team = st.selectbox("Select Team with Missing Star:", ["None"] + team_list)
     
-    # ... (Rest of the code stays exactly the same) ...
-    
-    # 2. Define the Impact
     usage_bump = 1.0
+    
     if injury_team != "None":
         st.warning(f"⚠️ Adjusting usage for {injury_team}...")
-        bump_pct = st.slider(f"Usage Bump for {injury_team} Teammates:", 0, 30, 15)
-        usage_bump = 1.0 + (bump_pct / 100.0)
-        st.caption(f"Applying {usage_bump}x multiplier to projections.")
+        
+        # 2. Select the Tier (Replaces the Slider)
+        tier = st.radio(
+            "Who is out?",
+            ["Tier 3: Co-Star (Chet/Kyrie)", 
+             "Tier 2: Primary (Tatum/Brunson)", 
+             "Tier 1: The System (Luka/SGA)"],
+            index=1
+        )
+        
+        # 3. Handle Multiple Injuries
+        multi_out = st.checkbox("Multiple Key Players Out? (+Stacking)")
+        
+        # Apply the Math
+        if "Tier 3" in tier: base_bump = 0.10  # 10%
+        elif "Tier 2" in tier: base_bump = 0.15 # 15%
+        else: base_bump = 0.20                 # 20% (Tier 1)
+        
+        # Stacking Logic (The Nuclear Cap)
+        if multi_out:
+            final_bump = 0.30 # Cap at 30% for safety
+            st.caption(f"🚨 Nuclear Scenario: Capped at 30% Bump.")
+        else:
+            final_bump = base_bump
+            st.caption(f"Applying {int(final_bump*100)}% usage boost.")
+            
+        usage_bump = 1.0 + final_bump
 
-    # 3. The 'Questionable' Kill Switch
-    # We pull team names from the market schedule
+    # 4. The 'Questionable' Kill Switch
     game_teams = sorted(list(set([s['home_team'] for s in market_schedule] + [s['away_team'] for s in market_schedule])))
     void_games = st.multiselect("⛔ VOID Games (Too much uncertainty):", game_teams)
 
