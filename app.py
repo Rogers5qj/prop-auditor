@@ -356,9 +356,9 @@ with injury_spot.container():
         # 2. Select the Tier (Replaces the Slider)
         tier = st.radio(
             "Who is out?",
-            ["Tier 3: Co-Star (Chet/Kyrie)", 
-             "Tier 2: Primary (Tatum/Brunson)", 
-             "Tier 1: The System (Luka/SGA)"],
+            ["Tier 3: Co-Star (Role Starters)", 
+             "Tier 2: Primary (Primary Scorers)", 
+             "Tier 1: The System (Ball Dominant)"],
             index=1
         )
         
