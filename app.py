@@ -427,6 +427,11 @@ if market_schedule and not df.empty:
                 proj_pts_high = high_pts_base * total_mult
                 proj_reb_high = (p['REB'] + (0.5 * 2.0)) * total_mult 
                 proj_ast_high = (p['AST'] + (0.5 * 1.5)) * total_mult
+
+                lines = market_lines.get(p['PLAYER_NAME'], {})
+                l_pts = lines.get('PTS', 999); l_reb = lines.get('REB', 999); l_ast = lines.get('AST', 999)
+                val_add = 0; bet_str = ""
+                # -------------------------------------
                 
                 # Calc Edges (Bidirectional Audit)
                 # CHECK OVERS (Compare vs Low Projection)
