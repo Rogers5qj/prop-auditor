@@ -189,13 +189,15 @@ def get_nba_data():
             measure_type_detailed_defense='Advanced', 
             per_mode_detailed='PerGame'
         ).get_data_frames()[0]
+        time.sleep(1.5) # <--- NEW: Bypass firewall
 
-        # 2. Team Stats (Four Factors) - Gets OPP_EFG_PCT (The missing piece!)
+        # 2. Team Stats (Four Factors) - Gets OPP_EFG_PCT
         four_factors = leaguedashteamstats.LeagueDashTeamStats(
             season='2025-26', 
             measure_type_detailed_defense='Four Factors', 
             per_mode_detailed='PerGame'
         ).get_data_frames()[0]
+        time.sleep(1.5) # <--- NEW: Bypass firewall
 
         # Merge them together on TEAM_ID
         team_stats = pd.merge(adv_stats, four_factors[['TEAM_ID', 'OPP_EFG_PCT']], on='TEAM_ID')
@@ -210,7 +212,7 @@ def get_nba_data():
                 'Name': row['TEAM_NAME'], 
                 'Pace': row['PACE'], 
                 'DefRtg': row['DEF_RATING'],
-                'OppEfg': row['OPP_EFG'] # Now this exists!
+                'OppEfg': row['OPP_EFG'] 
             } for _, row in team_stats.iterrows()
         }
         
@@ -224,11 +226,17 @@ def get_nba_data():
 
         # 3. Player Stats (Base)
         base = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Base', per_mode_detailed='PerGame').get_data_frames()[0]
+        time.sleep(1.5) # <--- NEW: Bypass firewall
+        
         adv = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame').get_data_frames()[0]
+        time.sleep(1.5) # <--- NEW: Bypass firewall
+        
         df = pd.merge(base[['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'MIN', 'GP', 'PTS', 'REB', 'AST', 'STL', 'BLK']], adv[['PLAYER_ID', 'DEF_RATING', 'USG_PCT']], on='PLAYER_ID')
         
         # 4. L5 Stats
         l5 = leaguedashplayerstats.LeagueDashPlayerStats(season='2025-26', last_n_games=5, per_mode_detailed='PerGame').get_data_frames()[0]
+        time.sleep(1.5) # <--- NEW: Bypass firewall
+        
         l5 = l5[['PLAYER_ID', 'PTS', 'REB', 'AST']].rename(columns={'PTS': 'L5_PTS', 'REB': 'L5_REB', 'AST': 'L5_AST'})
         df = pd.merge(df, l5, on='PLAYER_ID', how='left')
 
@@ -238,6 +246,12 @@ def get_nba_data():
         
         volatility_map = logs.groupby('PLAYER_ID')['PTS'].std().to_dict()
         df['PTS_VOLATILITY'] = df['PLAYER_ID'].map(volatility_map).fillna(5.0) 
+
+        return df, team_ctx, name_to_id_map, lg_pace, lg_def, lg_efg
+    except Exception as e: 
+        st.error(f"NBA Data Error: {e}")
+        return pd.DataFrame(), {}, {}, 100, 112, 0.55
+ 
 
         return df, team_ctx, name_to_id_map, lg_pace, lg_def, lg_efg
     except Exception as e: 
