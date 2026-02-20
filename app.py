@@ -138,8 +138,11 @@ with st.sidebar:
     st.markdown("*Financial Rigor for Sports Betting*")
     st.divider()
     
-    if "ODDS_API_KEY" in st.secrets:
-        api_key = st.secrets["ODDS_API_KEY"]
+    # ADD THESE TWO LINES:
+    app_mode = st.radio("🧭 Select Module:", ["📊 Pre-Game Ledger", "🔴 Live Halftime Auditor"])
+    st.divider()
+    
+    if "ODDS_API_KEY" in st.secrets:s["ODDS_API_KEY"]
         st.success("🔐 License Key Active")
     else:
         api_key = st.text_input("Odds API Key", type="password")
@@ -347,226 +350,298 @@ def generate_memo(edge, signal):
     return "📉 LOW PRIORITY: Minor Edge."
 
 # --- MAIN APP ---
-col1, col2, col3 = st.columns(3)
-now_et = datetime.utcnow() - timedelta(hours=5)
-today_str = now_et.strftime('%Y-%m-%d')
-col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
-col2.metric("Market Status", "Live", delta="Open")
-
-# Use Odds API for EVERYTHING (Bypasses NBA Schedule Block)
-with st.spinner('🔄 Running Crystal Ball Algorithms...'):
-    # Unpack the new 6 return values
-    df, team_ctx, name_to_id, lg_pace, lg_def, lg_efg = get_nba_data()
-    # Unpack the new 3 return values
-    market_lines, market_schedule, market_spreads = get_market_data(api_key, today_str)
-
-
-col3.metric("Active Lines", len(market_lines))
-
-# --- INSERT THIS BLOCK AFTER LINE 252 ---
-
-# --- NEW: INJURY MANAGER (SIDEBAR) ---
-# We add this here so it loads AFTER we get the data
-# --- CHANGE THIS BLOCK AT THE BOTTOM ---
-
-# Instead of "with st.sidebar:", we use the parking spot we made earlier
-# --- CHANGE THIS BLOCK AT THE BOTTOM ---
-
-# Instead of "with st.sidebar:", we use the parking spot we made earlier
-with injury_spot.container():
-    st.divider()
-    st.markdown("### 🚑 Injury Override")
+if app_mode == "📊 Pre-Game Ledger":
     
-    # 1. Select the Team with Injuries
-    team_list = sorted(list(name_to_id.keys()))
-    injury_team = st.selectbox("Select Team with Missing Star:", ["None"] + team_list)
+    col1, col2, col3 = st.columns(3)
+    now_et = datetime.utcnow() - timedelta(hours=5)
+    today_str = now_et.strftime('%Y-%m-%d')
+    col1.metric("Audit Date", now_et.strftime('%Y-%m-%d %I:%M %p ET'))
+    col2.metric("Market Status", "Live", delta="Open")
     
-    usage_bump = 1.0
+    # Use Odds API for EVERYTHING (Bypasses NBA Schedule Block)
+    with st.spinner('🔄 Running Crystal Ball Algorithms...'):
+        # Unpack the new 6 return values
+        df, team_ctx, name_to_id, lg_pace, lg_def, lg_efg = get_nba_data()
+        # Unpack the new 3 return values
+        market_lines, market_schedule, market_spreads = get_market_data(api_key, today_str)
     
-    if injury_team != "None":
-        st.warning(f"⚠️ Adjusting usage for {injury_team}...")
+    
+    col3.metric("Active Lines", len(market_lines))
+    
+    # --- INSERT THIS BLOCK AFTER LINE 252 ---
+    
+    # --- NEW: INJURY MANAGER (SIDEBAR) ---
+    # We add this here so it loads AFTER we get the data
+    # --- CHANGE THIS BLOCK AT THE BOTTOM ---
+    
+    # Instead of "with st.sidebar:", we use the parking spot we made earlier
+    # --- CHANGE THIS BLOCK AT THE BOTTOM ---
+    
+    # Instead of "with st.sidebar:", we use the parking spot we made earlier
+    with injury_spot.container():
+        st.divider()
+        st.markdown("### 🚑 Injury Override")
         
-        # 2. Select the Tier (Replaces the Slider)
-        tier = st.radio(
-            "Who is out?",
-            ["Tier 3: Co-Star (Role Starters)", 
-             "Tier 2: Primary (Primary Scorers)", 
-             "Tier 1: The System (Ball Dominant)"],
-            index=1
-        )
+        # 1. Select the Team with Injuries
+        team_list = sorted(list(name_to_id.keys()))
+        injury_team = st.selectbox("Select Team with Missing Star:", ["None"] + team_list)
         
-        # 3. Handle Multiple Injuries
-        multi_out = st.checkbox("Multiple Key Players Out? (+Stacking)")
+        usage_bump = 1.0
         
-        # Apply the Math
-        if "Tier 3" in tier: base_bump = 0.10  # 10%
-        elif "Tier 2" in tier: base_bump = 0.15 # 15%
-        else: base_bump = 0.20                 # 20% (Tier 1)
-        
-        # Stacking Logic (The Nuclear Cap)
-        if multi_out:
-            final_bump = 0.30 # Cap at 30% for safety
-            st.caption(f"🚨 Nuclear Scenario: Capped at 30% Bump.")
-        else:
-            final_bump = base_bump
-            st.caption(f"Applying {int(final_bump*100)}% usage boost.")
+        if injury_team != "None":
+            st.warning(f"⚠️ Adjusting usage for {injury_team}...")
             
-        usage_bump = 1.0 + final_bump
-
-    # 4. The 'Questionable' Kill Switch
-    game_teams = sorted(list(set([s['home_team'] for s in market_schedule] + [s['away_team'] for s in market_schedule])))
-    void_games = st.multiselect("⛔ VOID Games (Too much uncertainty):", game_teams)
-
-audit_results = []
-
-if market_schedule and not df.empty:
-    for game in market_schedule:
-        h_name, v_name = game['home_team'], game['away_team']
-        h_id, v_id = name_to_id.get(h_name, 0), name_to_id.get(v_name, 0)
-        
-        if h_id == 0 or v_id == 0: continue 
-
-        # --- 1. GET SPREAD FOR BLOWOUT CHECK ---
-        spread = market_spreads.get(h_name, 0)
-        blowout_risk = spread > 12.5 # Threshold for blowout
-        
-        for tid in [h_id, v_id]:
-            oid = v_id if tid == h_id else h_id
-            is_home = (tid == h_id)
+            # 2. Select the Tier (Replaces the Slider)
+            tier = st.radio(
+                "Who is out?",
+                ["Tier 3: Co-Star (Role Starters)", 
+                 "Tier 2: Primary (Primary Scorers)", 
+                 "Tier 1: The System (Ball Dominant)"],
+                index=1
+            )
             
-            # --- 2. ADVANCED FACTORS ---
-            pace_factor = ((team_ctx.get(tid,{}).get('Pace',100) + team_ctx.get(oid,{}).get('Pace',100))/2) / lg_pace
+            # 3. Handle Multiple Injuries
+            multi_out = st.checkbox("Multiple Key Players Out? (+Stacking)")
             
-            # Defense (NOW INCLUDES eFG% - Shot Quality)
-            opp_def = team_ctx.get(oid,{}).get('DefRtg', 112)
-            opp_efg = team_ctx.get(oid,{}).get('OppEfg', 0.55)
+            # Apply the Math
+            if "Tier 3" in tier: base_bump = 0.10  # 10%
+            elif "Tier 2" in tier: base_bump = 0.15 # 15%
+            else: base_bump = 0.20                 # 20% (Tier 1)
             
-            # We average the Rating Factor and the Shot Quality Factor
-            def_rating_factor = opp_def / lg_def
-            shot_quality_factor = opp_efg / lg_efg
-            combined_def_factor = (def_rating_factor + shot_quality_factor) / 2
+            # Stacking Logic (The Nuclear Cap)
+            if multi_out:
+                final_bump = 0.30 # Cap at 30% for safety
+                st.caption(f"🚨 Nuclear Scenario: Capped at 30% Bump.")
+            else:
+                final_bump = base_bump
+                st.caption(f"Applying {int(final_bump*100)}% usage boost.")
+                
+            usage_bump = 1.0 + final_bump
+    
+        # 4. The 'Questionable' Kill Switch
+        game_teams = sorted(list(set([s['home_team'] for s in market_schedule] + [s['away_team'] for s in market_schedule])))
+        void_games = st.multiselect("⛔ VOID Games (Too much uncertainty):", game_teams)
+    
+    audit_results = []
+    
+    if market_schedule and not df.empty:
+        for game in market_schedule:
+            h_name, v_name = game['home_team'], game['away_team']
+            h_id, v_id = name_to_id.get(h_name, 0), name_to_id.get(v_name, 0)
             
-            roster = df[df['TEAM_ID'] == tid].sort_values('MIN', ascending=False).head(9)
+            if h_id == 0 or v_id == 0: continue 
+    
+            # --- 1. GET SPREAD FOR BLOWOUT CHECK ---
+            spread = market_spreads.get(h_name, 0)
+            blowout_risk = spread > 12.5 # Threshold for blowout
             
-# --- REPLACE THE INSIDE OF THE PLAYER LOOP WITH THIS ---
-            for _, p in roster.iterrows():
-                if p['MIN'] < 12: continue
+            for tid in [h_id, v_id]:
+                oid = v_id if tid == h_id else h_id
+                is_home = (tid == h_id)
                 
-                # A. CHECK FOR VOID (Kill Switch)
-                current_team_name = team_ctx.get(tid,{}).get('Name')
-                if current_team_name in void_games: continue
-
-                # B. APPLY INJURY BOOST (Usage Bump)
-                # If this player is on the team you selected, boost them
-                active_bump = usage_bump if current_team_name == injury_team else 1.0
+                # --- 2. ADVANCED FACTORS ---
+                pace_factor = ((team_ctx.get(tid,{}).get('Pace',100) + team_ctx.get(oid,{}).get('Pace',100))/2) / lg_pace
                 
-               # --- 3. APPLY CONSISTENCY & STRESS TEST ---
-                # "Safe Base" tests the floor (for Overs)
-                safe_pts_base = p['PTS'] - (0.5 * p['PTS_VOLATILITY'])
+                # Defense (NOW INCLUDES eFG% - Shot Quality)
+                opp_def = team_ctx.get(oid,{}).get('DefRtg', 112)
+                opp_efg = team_ctx.get(oid,{}).get('OppEfg', 0.55)
                 
-                # "High Base" tests the ceiling (for Unders)
-                high_pts_base = p['PTS'] + (0.5 * p['PTS_VOLATILITY'])
+                # We average the Rating Factor and the Shot Quality Factor
+                def_rating_factor = opp_def / lg_def
+                shot_quality_factor = opp_efg / lg_efg
+                combined_def_factor = (def_rating_factor + shot_quality_factor) / 2
                 
-                # --- 4. APPLY BLOWOUT TAX & INJURY BUMP ---
-                blowout_tax = 0.90 if blowout_risk else 1.0
-                home_factor = 1.03 if (is_home and p['USG_PCT'] < 0.20) else 1.0
+                roster = df[df['TEAM_ID'] == tid].sort_values('MIN', ascending=False).head(9)
                 
-                # FINAL CRYSTAL BALL PROJECTION (Ranges)
-                # We added 'active_bump' to the end here
-                total_mult = pace_factor * combined_def_factor * home_factor * blowout_tax * active_bump
-                
-                # Low projection (Conservative) - Use for OVERS
-                proj_pts_low = safe_pts_base * total_mult 
-                proj_reb_low = p['REB'] * total_mult
-                proj_ast_low = p['AST'] * total_mult
-
-                # High projection (Aggressive) - Use for UNDERS
-                proj_pts_high = high_pts_base * total_mult
-                proj_reb_high = (p['REB'] + (0.5 * 2.0)) * total_mult 
-                proj_ast_high = (p['AST'] + (0.5 * 1.5)) * total_mult
-
-                lines = market_lines.get(p['PLAYER_NAME'], {})
-                l_pts = lines.get('PTS', 999); l_reb = lines.get('REB', 999); l_ast = lines.get('AST', 999)
-                val_add = 0; bet_str = ""
-                # -------------------------------------
-                
-                # Calc Edges (Bidirectional Audit)
-                # CHECK OVERS (Compare vs Low Projection)
-                if l_pts != 999 and proj_pts_low > (l_pts + 2.0): 
-                    val_add += (proj_pts_low - l_pts)
-                    bet_str += f"PTS > {l_pts} "
-                if l_reb != 999 and proj_reb_low > (l_reb + 1.5): 
-                    val_add += (proj_reb_low - l_reb)
-                    bet_str += f"REB > {l_reb} "
-                if l_ast != 999 and proj_ast_low > (l_ast + 1.5): 
-                    val_add += (proj_ast_low - l_ast)
-                    bet_str += f"AST > {l_ast} "
-
-                # CHECK UNDERS (Compare vs High Projection)
-                if l_pts != 999 and proj_pts_high < (l_pts - 2.0):
-                    val_add += (l_pts - proj_pts_high)
-                    bet_str += f"PTS < {l_pts} "
-                if l_reb != 999 and proj_reb_high < (l_reb - 1.5):
-                    val_add += (l_reb - proj_reb_high)
-                    bet_str += f"REB < {l_reb} "
-                if l_ast != 999 and proj_ast_high < (l_ast - 1.5):
-                    val_add += (l_ast - proj_ast_high)
-                    bet_str += f"AST < {l_ast} "
-                
-                # Signal Generation
-                signal = "-"
-                if blowout_risk: signal = "⚠️ BLOWOUT" 
-                elif p['PTS_VOLATILITY'] > 8.0: signal = "⚠️ VOLATILE"
-                elif p['PTS'] + 1.2*p['REB'] + 1.5*p['AST'] > 45: signal = "ELITE"
-
-                if val_add >= min_edge or show_all:
-                    memo = generate_memo(val_add, signal)
+    # --- REPLACE THE INSIDE OF THE PLAYER LOOP WITH THIS ---
+                for _, p in roster.iterrows():
+                    if p['MIN'] < 12: continue
                     
-                    # Display logic (Show the projection that triggered the bet)
-                    display_pts = proj_pts_high if "PTS <" in bet_str else proj_pts_low
-                    display_reb = proj_reb_high if "REB <" in bet_str else proj_reb_low
-                    display_ast = proj_ast_high if "AST <" in bet_str else proj_ast_low
-                    
-                    d_pts = f"{round(display_pts,1)} ({l_pts})" if l_pts!=999 else "-"
-                    d_reb = f"{round(display_reb,1)} ({l_reb})" if l_reb!=999 else "-"
-                    d_ast = f"{round(display_ast,1)} ({l_ast})" if l_ast!=999 else "-"
-                    
-                    audit_results.append({
-                        "Date": today_str,
-                        "Player": p['PLAYER_NAME'],
-                        "Team": team_ctx.get(tid,{}).get('Name','UNK'),
-                        "Signal": signal,
-                        "Manager Memo": memo,
-                        "Bet": bet_str,
-                        "Edge": round(val_add, 1),
-                        "PTS": d_pts,
-                        "REB": d_reb,
-                        "AST": d_ast
-                    })
-
-
-st.subheader(f"📋 Daily Ledger ({len(audit_results)} Flags Found)")
-
-if audit_results:
-    res_df = pd.DataFrame(audit_results).sort_values(by='Edge', ascending=False)
-    if not show_all: res_df = res_df[res_df['Edge'] >= min_edge]
-    st.dataframe(res_df.drop(columns=['Date']), column_config={
-        "Manager Memo": st.column_config.TextColumn("Manager Memo", width="medium"),
-        "Edge": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=10),
-    }, use_container_width=True, hide_index=True)
+                    # A. CHECK FOR VOID (Kill Switch)
+                    current_team_name = team_ctx.get(tid,{}).get('Name')
+                    if current_team_name in void_games: continue
     
-    if st.button("💾 Commit to Ledger (Google Sheets)"):
-        if sheet:
-            try:
-                for item in audit_results:
-                    if item['Edge'] >= min_edge:
-                        sheet.append_row([item['Date'], item['Player'], item['Team'], item['Bet'], item['Edge'], "PENDING"])
-                st.success("✅ Updated Ledger!"); st.balloons()
-            except Exception as e: st.error(f"Error: {e}")
-        else: st.error("Sheet connection not active.")
-else:
-    # If schedule is empty (from Odds API), show this:
-    if not market_schedule:
-        st.warning("No Active Games found in the Betting Market. (Vegas is asleep).")
+                    # B. APPLY INJURY BOOST (Usage Bump)
+                    # If this player is on the team you selected, boost them
+                    active_bump = usage_bump if current_team_name == injury_team else 1.0
+                    
+                   # --- 3. APPLY CONSISTENCY & STRESS TEST ---
+                    # "Safe Base" tests the floor (for Overs)
+                    safe_pts_base = p['PTS'] - (0.5 * p['PTS_VOLATILITY'])
+                    
+                    # "High Base" tests the ceiling (for Unders)
+                    high_pts_base = p['PTS'] + (0.5 * p['PTS_VOLATILITY'])
+                    
+                    # --- 4. APPLY BLOWOUT TAX & INJURY BUMP ---
+                    blowout_tax = 0.90 if blowout_risk else 1.0
+                    home_factor = 1.03 if (is_home and p['USG_PCT'] < 0.20) else 1.0
+                    
+                    # FINAL CRYSTAL BALL PROJECTION (Ranges)
+                    # We added 'active_bump' to the end here
+                    total_mult = pace_factor * combined_def_factor * home_factor * blowout_tax * active_bump
+                    
+                    # Low projection (Conservative) - Use for OVERS
+                    proj_pts_low = safe_pts_base * total_mult 
+                    proj_reb_low = p['REB'] * total_mult
+                    proj_ast_low = p['AST'] * total_mult
+    
+                    # High projection (Aggressive) - Use for UNDERS
+                    proj_pts_high = high_pts_base * total_mult
+                    proj_reb_high = (p['REB'] + (0.5 * 2.0)) * total_mult 
+                    proj_ast_high = (p['AST'] + (0.5 * 1.5)) * total_mult
+    
+                    lines = market_lines.get(p['PLAYER_NAME'], {})
+                    l_pts = lines.get('PTS', 999); l_reb = lines.get('REB', 999); l_ast = lines.get('AST', 999)
+                    val_add = 0; bet_str = ""
+                    # -------------------------------------
+                    
+                    # Calc Edges (Bidirectional Audit)
+                    # CHECK OVERS (Compare vs Low Projection)
+                    if l_pts != 999 and proj_pts_low > (l_pts + 2.0): 
+                        val_add += (proj_pts_low - l_pts)
+                        bet_str += f"PTS > {l_pts} "
+                    if l_reb != 999 and proj_reb_low > (l_reb + 1.5): 
+                        val_add += (proj_reb_low - l_reb)
+                        bet_str += f"REB > {l_reb} "
+                    if l_ast != 999 and proj_ast_low > (l_ast + 1.5): 
+                        val_add += (proj_ast_low - l_ast)
+                        bet_str += f"AST > {l_ast} "
+    
+                    # CHECK UNDERS (Compare vs High Projection)
+                    if l_pts != 999 and proj_pts_high < (l_pts - 2.0):
+                        val_add += (l_pts - proj_pts_high)
+                        bet_str += f"PTS < {l_pts} "
+                    if l_reb != 999 and proj_reb_high < (l_reb - 1.5):
+                        val_add += (l_reb - proj_reb_high)
+                        bet_str += f"REB < {l_reb} "
+                    if l_ast != 999 and proj_ast_high < (l_ast - 1.5):
+                        val_add += (l_ast - proj_ast_high)
+                        bet_str += f"AST < {l_ast} "
+                    
+                    # Signal Generation
+                    signal = "-"
+                    if blowout_risk: signal = "⚠️ BLOWOUT" 
+                    elif p['PTS_VOLATILITY'] > 8.0: signal = "⚠️ VOLATILE"
+                    elif p['PTS'] + 1.2*p['REB'] + 1.5*p['AST'] > 45: signal = "ELITE"
+    
+                    if val_add >= min_edge or show_all:
+                        memo = generate_memo(val_add, signal)
+                        
+                        # Display logic (Show the projection that triggered the bet)
+                        display_pts = proj_pts_high if "PTS <" in bet_str else proj_pts_low
+                        display_reb = proj_reb_high if "REB <" in bet_str else proj_reb_low
+                        display_ast = proj_ast_high if "AST <" in bet_str else proj_ast_low
+                        
+                        d_pts = f"{round(display_pts,1)} ({l_pts})" if l_pts!=999 else "-"
+                        d_reb = f"{round(display_reb,1)} ({l_reb})" if l_reb!=999 else "-"
+                        d_ast = f"{round(display_ast,1)} ({l_ast})" if l_ast!=999 else "-"
+                        
+                        audit_results.append({
+                            "Date": today_str,
+                            "Player": p['PLAYER_NAME'],
+                            "Team": team_ctx.get(tid,{}).get('Name','UNK'),
+                            "Signal": signal,
+                            "Manager Memo": memo,
+                            "Bet": bet_str,
+                            "Edge": round(val_add, 1),
+                            "PTS": d_pts,
+                            "REB": d_reb,
+                            "AST": d_ast
+                        })
+    
+    
+    st.subheader(f"📋 Daily Ledger ({len(audit_results)} Flags Found)")
+    
+    if audit_results:
+        res_df = pd.DataFrame(audit_results).sort_values(by='Edge', ascending=False)
+        if not show_all: res_df = res_df[res_df['Edge'] >= min_edge]
+        st.dataframe(res_df.drop(columns=['Date']), column_config={
+            "Manager Memo": st.column_config.TextColumn("Manager Memo", width="medium"),
+            "Edge": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=10),
+        }, use_container_width=True, hide_index=True)
+        
+        if st.button("💾 Commit to Ledger (Google Sheets)"):
+            if sheet:
+                try:
+                    for item in audit_results:
+                        if item['Edge'] >= min_edge:
+                            sheet.append_row([item['Date'], item['Player'], item['Team'], item['Bet'], item['Edge'], "PENDING"])
+                    st.success("✅ Updated Ledger!"); st.balloons()
+                except Exception as e: st.error(f"Error: {e}")
+            else: st.error("Sheet connection not active.")
     else:
-        st.info("No discrepancies found. Market is sharp today.")
+        # If schedule is empty (from Odds API), show this:
+        if not market_schedule:
+            st.warning("No Active Games found in the Betting Market. (Vegas is asleep).")
+        else:
+            st.info("No discrepancies found. Market is sharp today.")
+
+
+elif app_mode == "🔴 Live Halftime Auditor":
+    
+    st.header("🔴 Live Prop Auditor")
+    st.info("Input real-time game data to project the player's finish against the live betting line.")
+
+    # --- INPUTS ---
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("### ⛹️‍♂️ Player Status")
+        player_name = st.text_input("Player Name", "Jamal Murray")
+        current_stat = st.number_input("Current Stats (PTS, REB, or AST)", value=7.0, step=1.0)
+        mins_played = st.number_input("Minutes Played So Far", value=18.0, step=1.0)
+        
+    with col2:
+        st.markdown("### 📈 Market & Baselines")
+        live_line = st.number_input("Current Live Line", value=11.5, step=0.5)
+        season_avg_per_36 = st.number_input("Season Avg (Per 36 Mins)", value=8.5, step=0.1)
+        st.caption("*Tip: If they average 8 assists in 32 mins, their Per-36 is (8 / 32) * 36 = 9.0*")
+        
+    st.divider()
+    
+    # --- CONTEXT VARIABLES ---
+    st.markdown("### 🧠 The Crystal Ball Context")
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        q_left = st.slider("Quarters Remaining", 0.0, 3.0, 2.0, 0.5)
+    with c2:
+        usage_bump = st.radio("Key Teammate Out?", ["No", "Yes (Tier 2 - Primary)", "Yes (Tier 1 - The System)"], index=2)
+    with c3:
+        rotation_risk = st.checkbox("Blowout Risk? (Starters sit early)", value=False)
+
+    # --- THE MATH ENGINE ---
+    if st.button("🚀 Run Live Audit", use_container_width=True):
+        
+        # 1. Determine Usage Multiplier
+        if "Tier 1" in usage_bump: multiplier = 1.25  # +25% rate
+        elif "Tier 2" in usage_bump: multiplier = 1.15 # +15% rate
+        else: multiplier = 1.0
+        
+        # 2. Estimate Remaining Minutes (Standard rotation is ~9 mins per quarter for a star)
+        est_mins_remaining = q_left * 9.0 
+        if rotation_risk: est_mins_remaining *= 0.75 # Reduce by 25% if blowout
+        
+        # 3. Calculate "Rest of Game" Production
+        production_rate_per_min = (season_avg_per_36 / 36.0) * multiplier
+        projected_future_stats = production_rate_per_min * est_mins_remaining
+        
+        # 4. Final Projection
+        final_proj = current_stat + projected_future_stats
+        diff = final_proj - live_line
+        
+        # --- THE VERDICT UI ---
+        st.divider()
+        st.markdown(f"### Audit Results for {player_name}")
+        
+        res_col1, res_col2, res_col3 = st.columns(3)
+        res_col1.metric("Banked Stats", current_stat)
+        res_col2.metric("Projected Rest of Game", f"+ {projected_future_stats:.1f}")
+        res_col3.metric("Final Projection", f"{final_proj:.1f}", delta=f"{diff:.1f} vs Line")
+        
+        if diff > 1.5:
+            st.success(f"📈 **HAMMER THE OVER.** The math supports a heavy finish. (Gap: +{diff:.1f})")
+            st.caption("Reasoning: Usage spike is sustaining performance beyond the market's regression model.")
+        elif diff < -1.5:
+            st.error(f"📉 **FADE / TAKE THE UNDER.** The pace isn't sustainable. (Gap: {diff:.1f})")
+        else:
+            st.warning("⚖️ **STAY AWAY.** The live line is sharp and priced correctly.")
