@@ -133,16 +133,16 @@ def grade_pending_bets(sheet):
         return f"Grading Error: {e}", []
 
 # --- SIDEBAR ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🧾 The Prop Auditor")
     st.markdown("*Financial Rigor for Sports Betting*")
     st.divider()
     
-    # ADD THESE TWO LINES:
     app_mode = st.radio("🧭 Select Module:", ["📊 Pre-Game Ledger", "🔴 Live Halftime Auditor"])
     st.divider()
     
-   if "ODDS_API_KEY" in st.secrets:
+    if "ODDS_API_KEY" in st.secrets:
         api_key = st.secrets["ODDS_API_KEY"]
         st.success("🔐 License Key Active")
     else:
