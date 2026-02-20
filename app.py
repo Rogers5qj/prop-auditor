@@ -11,19 +11,16 @@ from nba_api.stats.endpoints import leaguedashteamstats, leaguedashplayerstats
 
 # --- NEW: HUMAN DISGUISE HEADERS ---
 custom_headers = {
-    'Host': 'stats.nba.com',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.5',
+    'Accept-Language': 'en-US,en;q=0.9',
     'Referer': 'https://www.nba.com/',
     'Origin': 'https://www.nba.com/',
-    'DNT': '1',
     'Connection': 'keep-alive',
     'Sec-Fetch-Dest': 'empty',
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Site': 'same-site',
-    'Pragma': 'no-cache',
-    'Cache-Control': 'no-cache',
+}
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="The Prop Auditor", page_icon="🧾", layout="wide", initial_sidebar_state="expanded")
@@ -205,6 +202,7 @@ def get_nba_data():
             measure_type_detailed_defense='Advanced', 
             per_mode_detailed='PerGame',
             headers=custom_headers # <--- ADDED
+            timeout=60
         ).get_data_frames()[0]
         time.sleep(1.0) 
 
@@ -214,6 +212,7 @@ def get_nba_data():
             measure_type_detailed_defense='Four Factors', 
             per_mode_detailed='PerGame',
             headers=custom_headers # <--- ADDED
+            timeout=60
         ).get_data_frames()[0]
         time.sleep(1.0) 
 
@@ -246,11 +245,13 @@ def get_nba_data():
         base = leaguedashplayerstats.LeagueDashPlayerStats(
             season='2025-26', measure_type_detailed_defense='Base', per_mode_detailed='PerGame', headers=custom_headers
         ).get_data_frames()[0]
+        timeout=60
         time.sleep(1.0) 
         
         adv = leaguedashplayerstats.LeagueDashPlayerStats(
             season='2025-26', measure_type_detailed_defense='Advanced', per_mode_detailed='PerGame', headers=custom_headers
         ).get_data_frames()[0]
+        timeout=60
         time.sleep(1.0) 
         
         df = pd.merge(base[['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'MIN', 'GP', 'PTS', 'REB', 'AST', 'STL', 'BLK']], adv[['PLAYER_ID', 'DEF_RATING', 'USG_PCT']], on='PLAYER_ID')
@@ -259,6 +260,7 @@ def get_nba_data():
         l5 = leaguedashplayerstats.LeagueDashPlayerStats(
             season='2025-26', last_n_games=5, per_mode_detailed='PerGame', headers=custom_headers
         ).get_data_frames()[0]
+        timeout=60
         time.sleep(1.0) 
         
         l5 = l5[['PLAYER_ID', 'PTS', 'REB', 'AST']].rename(columns={'PTS': 'L5_PTS', 'REB': 'L5_REB', 'AST': 'L5_AST'})
