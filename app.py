@@ -201,8 +201,7 @@ def get_nba_data():
             season='2025-26', 
             measure_type_detailed_defense='Advanced', 
             per_mode_detailed='PerGame',
-            headers=custom_headers # <--- ADDED
-            timeout=60
+            headers=custom_headers
         ).get_data_frames()[0]
         time.sleep(1.0) 
 
@@ -212,7 +211,6 @@ def get_nba_data():
             measure_type_detailed_defense='Four Factors', 
             per_mode_detailed='PerGame',
             headers=custom_headers # <--- ADDED
-            timeout=60
         ).get_data_frames()[0]
         time.sleep(1.0) 
 
