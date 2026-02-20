@@ -142,8 +142,9 @@ with st.sidebar:
     app_mode = st.radio("🧭 Select Module:", ["📊 Pre-Game Ledger", "🔴 Live Halftime Auditor"])
     st.divider()
     
-    if "ODDS_API_KEY" in st.secrets:s["ODDS_API_KEY"]
-    st.success("🔐 License Key Active")
+   if "ODDS_API_KEY" in st.secrets:
+        api_key = st.secrets["ODDS_API_KEY"]
+        st.success("🔐 License Key Active")
     else:
         api_key = st.text_input("Odds API Key", type="password")
 
