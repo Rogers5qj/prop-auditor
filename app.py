@@ -143,7 +143,7 @@ with st.sidebar:
     st.divider()
     
     if "ODDS_API_KEY" in st.secrets:s["ODDS_API_KEY"]
-        st.success("🔐 License Key Active")
+    st.success("🔐 License Key Active")
     else:
         api_key = st.text_input("Odds API Key", type="password")
 
