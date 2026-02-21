@@ -356,6 +356,7 @@ def get_live_box_scores():
     """Pings the NBA CDN for live data, cached for 30 seconds to prevent IP bans."""
     try:
         from nba_api.live.nba.endpoints import scoreboard, boxscore
+        import re 
         board = scoreboard.ScoreBoard().get_dict()
         live_games = [g['gameId'] for g in board['scoreboard']['games'] if g['gameStatus'] > 1]
     except Exception:
@@ -371,19 +372,38 @@ def get_live_box_scores():
             all_players = game_data['game']['homeTeam']['players'] + game_data['game']['awayTeam']['players']
             
             for p in all_players:
-                mins_str = p['statistics']['minutes']
+                stats = p.get('statistics', {})
+                
+                # 1. Safely handle "None" values from the API
+                pts = stats.get('points', 0)
+                reb = stats.get('reboundsTotal', 0)
+                ast = stats.get('assists', 0)
+                
+                pts = int(pts) if pts else 0
+                reb = int(reb) if reb else 0
+                ast = int(ast) if ast else 0
+                
+                # 2. Safely parse the "PT18M30.00S" time string
+                mins_str = str(stats.get('minutes', 'PT00M00.00S'))
                 live_mins = 0.0
-                if "M" in mins_str:
-                    m_part = mins_str.split("M")[0].replace("PT", "")
-                    s_part = mins_str.split("M")[1].replace("S", "") if "S" in mins_str else 0
-                    try:
-                        live_mins = int(m_part) + (int(s_part) / 60.0)
-                    except Exception: pass
+                
+                if "PT" in mins_str:
+                    m_match = re.search(r'(\d+)M', mins_str)
+                    m = int(m_match.group(1)) if m_match else 0
+                    
+                    s_match = re.search(r'([\d\.]+)S', mins_str)
+                    s = float(s_match.group(1)) if s_match else 0.0
+                    
+                    live_mins = m + (s / 60.0)
+                elif ":" in mins_str:  # Fallback just in case they change the format
+                    parts = mins_str.split(":")
+                    if len(parts) == 2:
+                        live_mins = int(parts[0]) + (float(parts[1]) / 60.0)
                     
                 live_player_stats[p['name']] = {
-                    'PTS': p['statistics']['points'],
-                    'REB': p['statistics']['reboundsTotal'],
-                    'AST': p['statistics']['assists'],
+                    'PTS': pts,
+                    'REB': reb,
+                    'AST': ast,
                     'MIN': live_mins
                 }
         except Exception: continue
