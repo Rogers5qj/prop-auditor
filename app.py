@@ -352,13 +352,17 @@ def generate_memo(edge, signal):
     return "📉 LOW PRIORITY: Minor Edge."
 
 @st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def get_live_box_scores():
     """Pings the NBA CDN for live data, cached for 30 seconds to prevent IP bans."""
     try:
         from nba_api.live.nba.endpoints import scoreboard, boxscore
         import re 
         board = scoreboard.ScoreBoard().get_dict()
-        live_games = [g['gameId'] for g in board['scoreboard']['games'] if g['gameStatus'] > 1]
+        
+        # Isolate the active games list
+        games = board.get('scoreboard', {}).get('games', [])
+        live_games = [g for g in games if g['gameStatus'] > 1]
     except Exception:
         return {}
 
@@ -366,7 +370,22 @@ def get_live_box_scores():
         return {}
 
     live_player_stats = {}
-    for gid in live_games:
+    for g in live_games:
+        gid = g['gameId']
+        
+        # --- NEW: Extract Game Context ---
+        period = g.get('period', 1)
+        clock = g.get('gameClock', '')
+        if not clock: clock = "0:00"
+        
+        away_team = g.get('awayTeam', {}).get('teamTricode', 'AWAY')
+        away_score = g.get('awayTeam', {}).get('score', 0)
+        home_team = g.get('homeTeam', {}).get('teamTricode', 'HOME')
+        home_score = g.get('homeTeam', {}).get('score', 0)
+        
+        # Format string: "Q3 10:24 | LAL 85 - BOS 82"
+        game_context = f"Q{period} {clock} | {away_team} {away_score} - {home_score} {home_team}"
+
         try:
             game_data = boxscore.BoxScore(gid).get_dict()
             all_players = game_data['game']['homeTeam']['players'] + game_data['game']['awayTeam']['players']
@@ -374,16 +393,11 @@ def get_live_box_scores():
             for p in all_players:
                 stats = p.get('statistics', {})
                 
-                # 1. Safely handle "None" values from the API
-                pts = stats.get('points', 0)
-                reb = stats.get('reboundsTotal', 0)
-                ast = stats.get('assists', 0)
+                pts = int(stats.get('points', 0) or 0)
+                reb = int(stats.get('reboundsTotal', 0) or 0)
+                ast = int(stats.get('assists', 0) or 0)
+                fouls = int(stats.get('foulsPersonal', 0) or 0) # <--- NEW: Grab Fouls
                 
-                pts = int(pts) if pts else 0
-                reb = int(reb) if reb else 0
-                ast = int(ast) if ast else 0
-                
-                # 2. Safely parse the "PT18M30.00S" time string
                 mins_str = str(stats.get('minutes', 'PT00M00.00S'))
                 live_mins = 0.0
                 
@@ -395,7 +409,7 @@ def get_live_box_scores():
                     s = float(s_match.group(1)) if s_match else 0.0
                     
                     live_mins = m + (s / 60.0)
-                elif ":" in mins_str:  # Fallback just in case they change the format
+                elif ":" in mins_str: 
                     parts = mins_str.split(":")
                     if len(parts) == 2:
                         live_mins = int(parts[0]) + (float(parts[1]) / 60.0)
@@ -404,7 +418,9 @@ def get_live_box_scores():
                     'PTS': pts,
                     'REB': reb,
                     'AST': ast,
-                    'MIN': live_mins
+                    'MIN': live_mins,
+                    'FOULS': fouls,            # <--- NEW
+                    'GAME_INFO': game_context  # <--- NEW
                 }
         except Exception: continue
         
@@ -585,10 +601,9 @@ elif app_mode == "🔴 Live Halftime Auditor":
     if not audit_results:
         st.warning("No active edges found in Pre-Game Ledger.")
     else:
-        if st.button("🔄 Fetch Live Box Scores", use_container_width=True):
+       if st.button("🔄 Fetch Live Box Scores", use_container_width=True):
             with st.spinner("Connecting to NBA Live CDN..."):
                 
-                # Use the cached function instead of raw API calls
                 live_player_stats = get_live_box_scores()
                 
                 if not live_player_stats:
@@ -600,34 +615,60 @@ elif app_mode == "🔴 Live Halftime Auditor":
                         p_name = res['Player']
                         if p_name in live_player_stats:
                             bet_str = res['Bet'].strip()
-                            stat_cat = bet_str[:3] 
+                            conditions = re.findall(r'(PTS|REB|AST)\s*(>|<)\s*([\d\.]+)', bet_str, re.IGNORECASE)
                             
-                            proj_val = float(str(res[stat_cat]).split(" ")[0])
-                            player_row = df[df['PLAYER_NAME'] == p_name].iloc[0]
-                            avg_mins = player_row['MIN']
-                            
-                            current_stat = live_player_stats[p_name][stat_cat]
-                            current_mins = live_player_stats[p_name]['MIN']
-                            
-                            rate_per_min = proj_val / avg_mins if avg_mins > 0 else 0
-                            mins_left = max(0, avg_mins - current_mins)
-                            projected_finish = current_stat + (rate_per_min * mins_left)
-                            
-                            live_audit_display.append({
-                                "Player": p_name,
-                                "Target Stat": stat_cat,
-                                "Bet": bet_str,
-                                "Banked": current_stat,
-                                "Mins Played": round(current_mins, 1),
-                                "Proj Finish": round(projected_finish, 1)
-                            })
+                            for cat, op, val in conditions:
+                                stat_cat = cat.upper()
+                                target_line = float(val)
+                                
+                                proj_val_str = str(res.get(stat_cat, "0"))
+                                if proj_val_str == "-": continue 
+                                
+                                proj_val = float(proj_val_str.split(" ")[0])
+                                player_row = df[df['PLAYER_NAME'] == p_name].iloc[0]
+                                avg_mins = player_row['MIN']
+                                
+                                current_stat = live_player_stats[p_name].get(stat_cat, 0)
+                                current_mins = live_player_stats[p_name].get('MIN', 0)
+                                
+                                # --- NEW: Extract Context Variables ---
+                                current_fouls = live_player_stats[p_name].get('FOULS', 0)
+                                game_status = live_player_stats[p_name].get('GAME_INFO', '')
+                                
+                                # Add a visual warning if they are in foul trouble (4+ fouls)
+                                foul_display = f"⚠️ {current_fouls}" if current_fouls >= 4 else str(current_fouls)
+                                
+                                rate_per_min = proj_val / avg_mins if avg_mins > 0 else 0
+                                mins_left = max(0, avg_mins - current_mins)
+                                projected_finish = current_stat + (rate_per_min * mins_left)
+                                
+                                diff = projected_finish - target_line
+                                if diff >= 1.5: signal = "🔥 OVER"
+                                elif diff <= -1.5: signal = "🧊 UNDER"
+                                else: signal = "⏳ HOLD"
+                                
+                                live_audit_display.append({
+                                    "Player": p_name,
+                                    "Game Status": game_status, # <--- Added to table
+                                    "PF": foul_display,         # <--- Added to table
+                                    "Target": f"{stat_cat} {op} {target_line}",
+                                    "Banked": current_stat,
+                                    "Mins": round(current_mins, 1),
+                                    "Proj Finish": round(projected_finish, 1),
+                                    "Gap": round(diff, 1),
+                                    "Action": signal
+                                })
                     
                     if live_audit_display:
-                        st.success(f"Matched {len(live_audit_display)} players currently on the floor.")
+                        st.success(f"Scanned {len(live_audit_display)} active conditions.")
                         live_df = pd.DataFrame(live_audit_display)
                         
                         st.dataframe(live_df, column_config={
-                            "Proj Finish": st.column_config.NumberColumn("Proppy Finish 🎯", format="%.1f")
+                            "Game Status": st.column_config.TextColumn("Game Status", width="medium"),
+                            "PF": st.column_config.TextColumn("PF", width="small"),
+                            "Proj Finish": st.column_config.NumberColumn("Proppy Finish 🎯", format="%.1f"),
+                            "Gap": st.column_config.NumberColumn("Gap vs Target", format="%.1f"),
+                            "Action": st.column_config.TextColumn("Verdict")
                         }, use_container_width=True, hide_index=True)
                     else:
                         st.info("None of your flagged players have registered live minutes yet.")
