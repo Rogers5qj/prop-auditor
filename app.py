@@ -8,6 +8,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta 
 from nba_api.stats.endpoints import leaguedashteamstats, leaguedashplayerstats
+from nba_api.live.nba.endpoints import scoreboard, boxscore
 
 # --- NEW: HUMAN DISGUISE HEADERS ---
 custom_headers = {
@@ -350,6 +351,45 @@ def generate_memo(edge, signal):
     if edge >= 2.0: return "✅ AUDIT APPROVED: Solid Trends."
     return "📉 LOW PRIORITY: Minor Edge."
 
+@st.cache_data(ttl=30, show_spinner=False)
+def get_live_box_scores():
+    """Pings the NBA CDN for live data, cached for 30 seconds to prevent IP bans."""
+    try:
+        from nba_api.live.nba.endpoints import scoreboard, boxscore
+        board = scoreboard.ScoreBoard().get_dict()
+        live_games = [g['gameId'] for g in board['scoreboard']['games'] if g['gameStatus'] > 1]
+    except Exception:
+        return {}
+
+    if not live_games:
+        return {}
+
+    live_player_stats = {}
+    for gid in live_games:
+        try:
+            game_data = boxscore.BoxScore(gid).get_dict()
+            all_players = game_data['game']['homeTeam']['players'] + game_data['game']['awayTeam']['players']
+            
+            for p in all_players:
+                mins_str = p['statistics']['minutes']
+                live_mins = 0.0
+                if "M" in mins_str:
+                    m_part = mins_str.split("M")[0].replace("PT", "")
+                    s_part = mins_str.split("M")[1].replace("S", "") if "S" in mins_str else 0
+                    try:
+                        live_mins = int(m_part) + (int(s_part) / 60.0)
+                    except Exception: pass
+                    
+                live_player_stats[p['name']] = {
+                    'PTS': p['statistics']['points'],
+                    'REB': p['statistics']['reboundsTotal'],
+                    'AST': p['statistics']['assists'],
+                    'MIN': live_mins
+                }
+        except Exception: continue
+        
+    return live_player_stats
+
 # --- MAIN APP ---
 col1, col2, col3 = st.columns(3)
 now_et = datetime.utcnow() - timedelta(hours=5)
@@ -519,75 +559,55 @@ if app_mode == "📊 Pre-Game Ledger":
 
 elif app_mode == "🔴 Live Halftime Auditor":
     
-    st.header("🔴 Live Prop Auditor")
-    st.info("Auditing active Pre-Game flags based on real-time game flow.")
+    st.header("🔴 Live Auto-Scanner")
+    st.info("Pings NBA live servers to instantly project the finish for all your flagged players.")
     
     if not audit_results:
-        st.warning("No active edges found to audit. Go back to the Pre-Game Ledger to lower the 'Min Edge' slider if you want to force options to appear.")
+        st.warning("No active edges found in Pre-Game Ledger.")
     else:
-        # Create the dropdown options pulling directly from today's active plays
-        flagged_options = [f"{r['Player']} | {r['Bet']} (Edge: {r['Edge']})" for r in audit_results]
-        selected_flag = st.selectbox("Select Proppy Flag to Audit:", flagged_options)
-        
-        # 1. Reverse-engineer the selected bet
-        selected_idx = flagged_options.index(selected_flag)
-        res = audit_results[selected_idx]
-        
-        player_name = res['Player']
-        bet_str = res['Bet'].strip() # e.g. "AST > 11.5"
-        stat_cat = bet_str[:3] # "PTS", "REB", or "AST"
-        original_line = float(bet_str.split(" ")[2])
-        
-        # Pull the Matchup-Adjusted Projection out of the string (e.g. "13.5 (11.5)")
-        proj_val = float(str(res[stat_cat]).split(" ")[0])
-        
-        # Get player's average minutes so we can calculate their specific rest-of-game time
-        player_row = df[df['PLAYER_NAME'] == player_name].iloc[0]
-        avg_mins = player_row['MIN']
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("### ⛹️‍♂️ Live Inputs")
-            current_stat = st.number_input(f"Current {stat_cat} Right Now:", value=0.0, step=1.0)
-            live_line = st.number_input("Current Live Vegas Line:", value=original_line, step=0.5)
-        with col2:
-            st.markdown("### 🧠 Pre-Game Baseline")
-            st.metric("Matchup-Adjusted Projection", f"{proj_val:.1f} {stat_cat}")
-            st.caption(f"*This includes opponent pace/defense. Based on {avg_mins:.1f} avg minutes.*")
-            
-        st.divider()
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            q_left = st.slider("Quarters Remaining", 0.0, 3.0, 2.0, 0.5)
-        with c2:
-            rotation_risk = st.checkbox("Blowout Risk? (Starters sit early)", value=False)
-            
-        if st.button("🚀 Run Live Audit", use_container_width=True):
-            
-            # 2. Calculate their specific Matchup-Adjusted Rate per minute
-            rate_per_min = proj_val / avg_mins if avg_mins > 0 else 0
-            
-            # 3. Estimate remaining minutes based on their average rotation
-            est_mins_remaining = (avg_mins / 4.0) * q_left
-            if rotation_risk: est_mins_remaining *= 0.75
-            
-            # 4. Math
-            rest_of_game_proj = rate_per_min * est_mins_remaining
-            final_proj = current_stat + rest_of_game_proj
-            diff = final_proj - live_line
-            
-            st.divider()
-            st.markdown(f"### Live Verdict: {player_name} {stat_cat}")
-            
-            res_col1, res_col2, res_col3 = st.columns(3)
-            res_col1.metric("Banked", current_stat)
-            res_col2.metric("Projected Rest of Game", f"+ {rest_of_game_proj:.1f}")
-            res_col3.metric("Final Projection", f"{final_proj:.1f}", delta=f"{diff:.1f} vs Line")
-            
-            if diff > 1.5:
-                st.success(f"📈 **HAMMER THE OVER.** (Gap: +{diff:.1f})")
-            elif diff < -1.5:
-                st.error(f"📉 **FADE / TAKE THE UNDER.** (Gap: {diff:.1f})")
-            else:
-                st.warning("⚖️ **STAY AWAY.** The live line has correctly adjusted to the pace.")
+        if st.button("🔄 Fetch Live Box Scores", use_container_width=True):
+            with st.spinner("Connecting to NBA Live CDN..."):
+                
+                # Use the cached function instead of raw API calls
+                live_player_stats = get_live_box_scores()
+                
+                if not live_player_stats:
+                    st.warning("No games are currently live or NBA servers are unreachable.")
+                else:
+                    live_audit_display = []
+                    
+                    for res in audit_results:
+                        p_name = res['Player']
+                        if p_name in live_player_stats:
+                            bet_str = res['Bet'].strip()
+                            stat_cat = bet_str[:3] 
+                            
+                            proj_val = float(str(res[stat_cat]).split(" ")[0])
+                            player_row = df[df['PLAYER_NAME'] == p_name].iloc[0]
+                            avg_mins = player_row['MIN']
+                            
+                            current_stat = live_player_stats[p_name][stat_cat]
+                            current_mins = live_player_stats[p_name]['MIN']
+                            
+                            rate_per_min = proj_val / avg_mins if avg_mins > 0 else 0
+                            mins_left = max(0, avg_mins - current_mins)
+                            projected_finish = current_stat + (rate_per_min * mins_left)
+                            
+                            live_audit_display.append({
+                                "Player": p_name,
+                                "Target Stat": stat_cat,
+                                "Bet": bet_str,
+                                "Banked": current_stat,
+                                "Mins Played": round(current_mins, 1),
+                                "Proj Finish": round(projected_finish, 1)
+                            })
+                    
+                    if live_audit_display:
+                        st.success(f"Matched {len(live_audit_display)} players currently on the floor.")
+                        live_df = pd.DataFrame(live_audit_display)
+                        
+                        st.dataframe(live_df, column_config={
+                            "Proj Finish": st.column_config.NumberColumn("Proppy Finish 🎯", format="%.1f")
+                        }, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("None of your flagged players have registered live minutes yet.")
