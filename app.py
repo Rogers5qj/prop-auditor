@@ -627,9 +627,6 @@ elif app_mode == "🔴 Live Halftime Auditor":
             with st.spinner("Connecting to NBA Live CDN..."):
                 
                 live_player_stats = get_live_box_scores()
-            with st.spinner("Connecting to NBA Live CDN..."):
-                
-                live_player_stats = get_live_box_scores()
                 
                 if not live_player_stats:
                     st.warning("No games are currently live or NBA servers are unreachable.")
