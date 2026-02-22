@@ -616,13 +616,12 @@ elif app_mode == "🔴 Live Halftime Auditor":
     if not audit_results:
         st.warning("No active edges found in Pre-Game Ledger.")
     else:
-        # --- NEW: Use session state to remember the fetch ---
         if "live_fetched" not in st.session_state:
             st.session_state.live_fetched = False
 
-       if st.button("🔄 Fetch Live Box Scores", use_container_width=True):
+        if st.button("🔄 Fetch Live Box Scores", use_container_width=True):
             st.session_state.live_fetched = True
-            get_live_box_scores.clear() # <--- ONLY clear the live scores, protect the Pre-Game memory!
+            get_live_box_scores.clear()
             
         if st.session_state.live_fetched:
             with st.spinner("Connecting to NBA Live CDN..."):
