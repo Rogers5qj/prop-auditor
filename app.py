@@ -352,7 +352,6 @@ def generate_memo(edge, signal):
     return "📉 LOW PRIORITY: Minor Edge."
 
 @st.cache_data(ttl=30, show_spinner=False)
-@st.cache_data(ttl=30, show_spinner=False)
 def get_live_box_scores():
     """Pings the NBA CDN for live data, cached for 30 seconds to prevent IP bans."""
     try:
@@ -617,7 +616,7 @@ elif app_mode == "🔴 Live Halftime Auditor":
     if not audit_results:
         st.warning("No active edges found in Pre-Game Ledger.")
     else:
-       if st.button("🔄 Fetch Live Box Scores", use_container_width=True):
+        if st.button("🔄 Fetch Live Box Scores", use_container_width=True):
             with st.spinner("Connecting to NBA Live CDN..."):
                 
                 live_player_stats = get_live_box_scores()
@@ -647,11 +646,10 @@ elif app_mode == "🔴 Live Halftime Auditor":
                                 current_stat = live_player_stats[p_name].get(stat_cat, 0)
                                 current_mins = live_player_stats[p_name].get('MIN', 0)
                                 
-                                # --- NEW: Extract Context Variables ---
+                                # Extract Context Variables
                                 current_fouls = live_player_stats[p_name].get('FOULS', 0)
                                 game_status = live_player_stats[p_name].get('GAME_INFO', '')
                                 
-                                # Add a visual warning if they are in foul trouble (4+ fouls)
                                 foul_display = f"⚠️ {current_fouls}" if current_fouls >= 4 else str(current_fouls)
                                 
                                 rate_per_min = proj_val / avg_mins if avg_mins > 0 else 0
@@ -665,8 +663,9 @@ elif app_mode == "🔴 Live Halftime Auditor":
                                 
                                 live_audit_display.append({
                                     "Player": p_name,
-                                    "Game Status": game_status, # <--- Added to table
-                                    "PF": foul_display,         # <--- Added to table
+                                    "Team": res['Team'],
+                                    "Game Status": game_status, 
+                                    "PF": foul_display,         
                                     "Target": f"{stat_cat} {op} {target_line}",
                                     "Banked": current_stat,
                                     "Mins": round(current_mins, 1),
@@ -675,7 +674,7 @@ elif app_mode == "🔴 Live Halftime Auditor":
                                     "Action": signal
                                 })
                     
-                   if live_audit_display:
+                    if live_audit_display:
                         st.success(f"Scanned {len(live_audit_display)} active conditions.")
                         live_df = pd.DataFrame(live_audit_display)
                         
@@ -687,7 +686,7 @@ elif app_mode == "🔴 Live Halftime Auditor":
                             "Action": st.column_config.TextColumn("Verdict")
                         }, use_container_width=True, hide_index=True)
                         
-                        # --- NEW: COPY TO CLIPBOARD (LIVE SINGLE PICK) ---
+                        # --- COPY TO CLIPBOARD (LIVE SINGLE PICK) ---
                         st.markdown("### 📋 Share a Live Verdict")
                         
                         live_share_options = []
@@ -701,14 +700,5 @@ elif app_mode == "🔴 Live Halftime Auditor":
                         if live_share_options:
                             selected_live_share = st.selectbox("Select a verdict to copy:", live_share_options, key="live_share")
                             st.code(live_share_map[selected_live_share], language="text")
-                        # -------------------------------------
-                        
-                        st.dataframe(live_df, column_config={
-                            "Game Status": st.column_config.TextColumn("Game Status", width="medium"),
-                            "PF": st.column_config.TextColumn("PF", width="small"),
-                            "Proj Finish": st.column_config.NumberColumn("Proppy Finish 🎯", format="%.1f"),
-                            "Gap": st.column_config.NumberColumn("Gap vs Target", format="%.1f"),
-                            "Action": st.column_config.TextColumn("Verdict")
-                        }, use_container_width=True, hide_index=True)
                     else:
                         st.info("None of your flagged players have registered live minutes yet.")
