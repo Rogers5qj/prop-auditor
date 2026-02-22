@@ -580,6 +580,22 @@ if app_mode == "📊 Pre-Game Ledger":
             "Edge": st.column_config.ProgressColumn("Value Score", format="%.1f", min_value=0, max_value=10),
         }, use_container_width=True, hide_index=True)
         
+        # --- NEW: COPY TO CLIPBOARD (PRE-GAME SINGLE PICK) ---
+        st.markdown("### 📋 Share a Pick")
+        
+        share_options = []
+        share_map = {}
+        for _, row in res_df.iterrows():
+            label = f"{row['Player']} | {row['Bet']}"
+            share_text = f"📊 *PROPPY PRE-GAME:* {row['Player']} ({row['Team']}) | {row['Bet']} | Edge: {row['Edge']}"
+            share_options.append(label)
+            share_map[label] = share_text
+            
+        if share_options:
+            selected_share = st.selectbox("Select a pick to copy:", share_options, key="pre_share")
+            st.code(share_map[selected_share], language="text")
+        # -----------------------------------------
+        
         if st.button("💾 Commit to Ledger (Google Sheets)"):
             if sheet:
                 try:
@@ -659,9 +675,33 @@ elif app_mode == "🔴 Live Halftime Auditor":
                                     "Action": signal
                                 })
                     
-                    if live_audit_display:
+                   if live_audit_display:
                         st.success(f"Scanned {len(live_audit_display)} active conditions.")
                         live_df = pd.DataFrame(live_audit_display)
+                        
+                        st.dataframe(live_df.drop(columns=['Team']), column_config={
+                            "Game Status": st.column_config.TextColumn("Game Status", width="medium"),
+                            "PF": st.column_config.TextColumn("PF", width="small"),
+                            "Proj Finish": st.column_config.NumberColumn("Proppy Finish 🎯", format="%.1f"),
+                            "Gap": st.column_config.NumberColumn("Gap vs Target", format="%.1f"),
+                            "Action": st.column_config.TextColumn("Verdict")
+                        }, use_container_width=True, hide_index=True)
+                        
+                        # --- NEW: COPY TO CLIPBOARD (LIVE SINGLE PICK) ---
+                        st.markdown("### 📋 Share a Live Verdict")
+                        
+                        live_share_options = []
+                        live_share_map = {}
+                        for item in live_audit_display:
+                            label = f"{item['Player']} | {item['Target']}"
+                            share_text = f"🔴 *PROPPY LIVE:* {item['Action']} | {item['Player']} ({item['Team']}) | {item['Target']} | Proj: {item['Proj Finish']}"
+                            live_share_options.append(label)
+                            live_share_map[label] = share_text
+                            
+                        if live_share_options:
+                            selected_live_share = st.selectbox("Select a verdict to copy:", live_share_options, key="live_share")
+                            st.code(live_share_map[selected_live_share], language="text")
+                        # -------------------------------------
                         
                         st.dataframe(live_df, column_config={
                             "Game Status": st.column_config.TextColumn("Game Status", width="medium"),
